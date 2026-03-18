@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "matches",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sessionId", "order": "ASCENDING" },
+        { "fieldPath": "round", "order": "ASCENDING" },
+        { "fieldPath": "court", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

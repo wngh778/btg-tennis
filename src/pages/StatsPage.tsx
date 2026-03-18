@@ -1,0 +1,197 @@
+import { useEffect, useState, useRef } from 'react';
+import { getAllMatches, getMembers, getSessions } from '../lib/database';
+import type { Match, Session } from '../types';
+
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+interface PlayerStat {
+  id: string;
+  name: string;
+  gender: 'male' | 'female';
+  wins: number;
+  losses: number;
+}
+
+interface CachedData {
+  allMatches: Match[];
+  playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>;
+}
+
+export default function StatsPage() {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
+  const [stats, setStats] = useState<PlayerStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const cachedData = useRef<CachedData | null>(null);
+
+  const computeStats = (
+    allMatches: Match[],
+    playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>,
+    sessionId: string
+  ) => {
+    const filtered = sessionId === 'all'
+      ? allMatches
+      : allMatches.filter(m => m.sessionId === sessionId);
+
+    const statMap = new Map<string, PlayerStat>();
+
+    const ensurePlayer = (id: string) => {
+      if (!statMap.has(id)) {
+        const info = playerInfo.get(id);
+        statMap.set(id, {
+          id,
+          name: info?.name ?? id,
+          gender: info?.gender ?? 'male',
+          wins: 0,
+          losses: 0,
+        });
+      }
+      return statMap.get(id)!;
+    };
+
+    filtered.forEach(m => {
+      if (!m.isCompleted || !m.score1 || !m.score2) return;
+      const s1 = parseInt(m.score1, 10);
+      const s2 = parseInt(m.score2, 10);
+      if (isNaN(s1) || isNaN(s2)) return;
+
+      const team1Players = [m.team1.player1, m.team1.player2];
+      const team2Players = [m.team2.player1, m.team2.player2];
+
+      if (s1 > s2) {
+        team1Players.forEach(p => { ensurePlayer(p.id).wins += 1; });
+        team2Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
+      } else if (s2 > s1) {
+        team2Players.forEach(p => { ensurePlayer(p.id).wins += 1; });
+        team1Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
+      } else {
+        [...team1Players, ...team2Players].forEach(p => { ensurePlayer(p.id); });
+      }
+    });
+
+    const result = Array.from(statMap.values()).sort((a, b) => {
+      const aTotal = a.wins + a.losses;
+      const bTotal = b.wins + b.losses;
+      const aRate = aTotal > 0 ? a.wins / aTotal : 0;
+      const bRate = bTotal > 0 ? b.wins / bTotal : 0;
+      if (bRate !== aRate) return bRate - aRate;
+      return b.wins - a.wins;
+    });
+
+    setStats(result);
+  };
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      const [allMatches, members, allSessions] = await Promise.all([
+        getAllMatches(),
+        getMembers(),
+        getSessions(),
+      ]);
+
+      setSessions(allSessions);
+
+      const playerInfo = new Map<string, { name: string; gender: 'male' | 'female' }>();
+      members.forEach(m => playerInfo.set(m.id, { name: m.name, gender: m.gender }));
+
+      // Also collect player info from matches (includes guests)
+      allMatches.forEach(m => {
+        [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2].forEach(p => {
+          if (!playerInfo.has(p.id)) {
+            playerInfo.set(p.id, { name: p.name, gender: p.gender });
+          }
+        });
+      });
+
+      cachedData.current = { allMatches, playerInfo };
+      computeStats(allMatches, playerInfo, 'all');
+      setLoading(false);
+    };
+    fetchData();
+  }, []);
+
+  const handleSessionChange = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    if (cachedData.current) {
+      computeStats(cachedData.current.allMatches, cachedData.current.playerInfo, sessionId);
+    }
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <h1 className="text-xl font-bold text-slate-800">전적 현황</h1>
+
+      {/* Session filter */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+        <label className="block text-sm font-medium text-slate-700 mb-2">경기 일정 필터</label>
+        <select
+          value={selectedSessionId}
+          onChange={e => handleSessionChange(e.target.value)}
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+        >
+          <option value="all">전체</option>
+          {sessions.map(s => (
+            <option key={s.id} value={s.id}>{formatDate(s.date)}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Stats table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+          <h2 className="font-semibold text-slate-700">선수별 전적 ({stats.length}명)</h2>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-10 text-slate-500">불러오는 중...</div>
+        ) : stats.length === 0 ? (
+          <div className="text-center py-10 text-slate-400">완료된 경기가 없습니다.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-500">
+                  <th className="px-5 py-2.5 text-left font-medium">순위</th>
+                  <th className="px-5 py-2.5 text-left font-medium">이름</th>
+                  <th className="px-4 py-2.5 text-center font-medium">경기</th>
+                  <th className="px-4 py-2.5 text-center font-medium">승</th>
+                  <th className="px-4 py-2.5 text-center font-medium">패</th>
+                  <th className="px-4 py-2.5 text-center font-medium">승률</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {stats.map((s, idx) => {
+                  const total = s.wins + s.losses;
+                  const rate = total > 0 ? Math.round((s.wins / total) * 100) : 0;
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-3 text-slate-400 text-center">{idx + 1}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                          <span className="font-medium text-slate-800">{s.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center text-slate-600">{total}</td>
+                      <td className="px-4 py-3 text-center font-medium text-green-600">{s.wins}</td>
+                      <td className="px-4 py-3 text-center text-red-400">{s.losses}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`font-semibold ${rate >= 50 ? 'text-green-600' : 'text-slate-500'}`}>
+                          {total > 0 ? `${rate}%` : '-'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

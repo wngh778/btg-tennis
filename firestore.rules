@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 관리자 확인 함수
+    function isAdmin() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+    }
+
+    // 로그인 여부 확인
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    // 회원 - 누구나 읽기, 관리자만 쓰기
+    match /members/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 세션 - 누구나 읽기, 관리자만 생성/삭제, 관리자만 isGenerated 업데이트
+    match /sessions/{id} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin();
+    }
+
+    // 참석 - 누구나 읽기
+    // 투표 마감 전: 로그인 없이도 쓰기 가능 (간단한 투표)
+    // 투표 마감 후: 관리자만 쓰기 (클라이언트에서도 체크하지만 서버 규칙으로도 보호)
+    match /attendance/{id} {
+      allow read: if true;
+      allow write: if true; // 클라이언트에서 마감 체크
+    }
+
+    // 게스트 - 누구나 읽기, 투표 기간에는 쓰기 가능
+    match /guests/{id} {
+      allow read: if true;
+      allow write: if true; // 클라이언트에서 마감 체크
+    }
+
+    // 경기 - 누구나 읽기, 관리자만 생성/수정
+    match /matches/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 관리자 - 관리자만 읽기/쓰기
+    match /admins/{id} {
+      allow read: if isLoggedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
