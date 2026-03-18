@@ -333,7 +333,7 @@ export default function SessionDetailPage() {
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                       <span className="font-medium text-slate-800">{m.name}</span>
-                      <span className="text-xs font-mono text-slate-400">{m.ntrp.toFixed(1)}</span>
+                      {isAdminUser && <span className="text-xs font-mono text-slate-400">{m.ntrp.toFixed(1)}</span>}
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -435,7 +435,7 @@ export default function SessionDetailPage() {
                       <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-xs font-medium">게스트</span>
                       <span className={`w-2 h-2 rounded-full ${g.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                       <span className="font-medium text-slate-800">{g.name}</span>
-                      <span className="text-xs font-mono text-slate-400">{g.ntrp.toFixed(1)}</span>
+                      {isAdminUser && <span className="text-xs font-mono text-slate-400">{g.ntrp.toFixed(1)}</span>}
                       <span className="text-xs text-slate-400">{g.gender === 'male' ? '남' : '여'}</span>
                     </div>
                     {isAdminUser && (
@@ -535,6 +535,7 @@ export default function SessionDetailPage() {
                 pendingMatches={pendingMatches.filter(m => m.round === round)}
                 selectedPlayer={selectedPlayer}
                 onPlayerClick={handlePlayerClick}
+                showNtrp={isAdminUser}
               />
             ))
           )}
@@ -543,7 +544,7 @@ export default function SessionDetailPage() {
 
       {/* Detail Tab */}
       {tab === 'detail' && (
-        <PlayerDetailTab attendingPlayers={attendingPlayers} matches={matches} />
+        <PlayerDetailTab attendingPlayers={attendingPlayers} matches={matches} showNtrp={isAdminUser} />
       )}
 
       {/* Result Tab */}
@@ -554,7 +555,7 @@ export default function SessionDetailPage() {
   );
 }
 
-function PlayerDetailTab({ attendingPlayers, matches }: { attendingPlayers: Player[]; matches: Match[] }) {
+function PlayerDetailTab({ attendingPlayers, matches, showNtrp }: { attendingPlayers: Player[]; matches: Match[]; showNtrp: boolean }) {
   // Per-player game count by type
   type PlayerStat = { male: number; female: number; mixed: number; total: number };
   const stats = new Map<string, PlayerStat>();
@@ -633,6 +634,7 @@ function PlayerDetailTab({ attendingPlayers, matches }: { attendingPlayers: Play
                   {p.type === 'guest' && (
                     <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
                   )}
+                  {showNtrp && <span className="text-xs font-mono text-slate-400">{p.ntrp.toFixed(1)}</span>}
                 </div>
                 <span className="text-sm text-blue-600 font-medium w-10 text-center">{s.male > 0 ? s.male : '-'}</span>
                 <span className="text-sm text-purple-600 font-medium w-10 text-center">{s.mixed > 0 ? s.mixed : '-'}</span>
@@ -753,7 +755,7 @@ function SessionResultTab({ attendingPlayers, matches }: { attendingPlayers: Pla
 
 function RoundCard({
   round, matches, attendingPlayers, canEditScore, onScoreUpdate,
-  editMode, pendingMatches, selectedPlayer, onPlayerClick,
+  editMode, pendingMatches, selectedPlayer, onPlayerClick, showNtrp,
 }: {
   round: number;
   matches: Match[];
@@ -764,6 +766,7 @@ function RoundCard({
   pendingMatches: Match[];
   selectedPlayer: SelectedPlayer;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
+  showNtrp: boolean;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -786,6 +789,7 @@ function RoundCard({
             editMode={editMode}
             selectedPlayer={selectedPlayer}
             onPlayerClick={onPlayerClick}
+            showNtrp={showNtrp}
           />
         ))}
       </div>
@@ -805,7 +809,7 @@ function RoundCard({
 }
 
 function MatchCard({
-  match, canEditScore, onScoreUpdate, editMode, selectedPlayer, onPlayerClick,
+  match, canEditScore, onScoreUpdate, editMode, selectedPlayer, onPlayerClick, showNtrp,
 }: {
   match: Match;
   canEditScore: boolean;
@@ -813,6 +817,7 @@ function MatchCard({
   editMode: boolean;
   selectedPlayer: SelectedPlayer;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
+  showNtrp: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [score1, setScore1] = useState(match.score1 || '');
@@ -849,15 +854,17 @@ function MatchCard({
               editMode={editMode}
               isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team1' && selectedPlayer?.slot === 'player1'}
               onClick={() => onPlayerClick(match.id, 'team1', 'player1', match.team1.player1)}
+              showNtrp={showNtrp}
             />
             <PlayerBadge
               player={match.team1.player2}
               editMode={editMode}
               isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team1' && selectedPlayer?.slot === 'player2'}
               onClick={() => onPlayerClick(match.id, 'team1', 'player2', match.team1.player2)}
+              showNtrp={showNtrp}
             />
           </div>
-          <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>
+          {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
         </div>
 
         {/* Score */}
@@ -913,15 +920,17 @@ function MatchCard({
               editMode={editMode}
               isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team2' && selectedPlayer?.slot === 'player1'}
               onClick={() => onPlayerClick(match.id, 'team2', 'player1', match.team2.player1)}
+              showNtrp={showNtrp}
             />
             <PlayerBadge
               player={match.team2.player2}
               editMode={editMode}
               isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team2' && selectedPlayer?.slot === 'player2'}
               onClick={() => onPlayerClick(match.id, 'team2', 'player2', match.team2.player2)}
+              showNtrp={showNtrp}
             />
           </div>
-          <div className="text-xs text-slate-400 mt-2">평균 {t2Ntrp}</div>
+          {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t2Ntrp}</div>}
         </div>
       </div>
     </div>
@@ -929,12 +938,13 @@ function MatchCard({
 }
 
 function PlayerBadge({
-  player, editMode, isSelected, onClick,
+  player, editMode, isSelected, onClick, showNtrp,
 }: {
   player: Player;
   editMode: boolean;
   isSelected: boolean;
   onClick: () => void;
+  showNtrp: boolean;
 }) {
   const content = (
     <div className="flex items-center gap-1.5">
@@ -943,7 +953,7 @@ function PlayerBadge({
       {player.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
-      <span className="text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>
+      {showNtrp && <span className="text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
     </div>
   );
 

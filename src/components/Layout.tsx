@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 const navItems = [
   { path: '/', label: '홈' },
   { path: '/sessions', label: '경기 일정' },
-  { path: '/members', label: '회원 관리' },
   { path: '/stats', label: '전적' },
 ];
 
@@ -33,6 +32,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {item.label}
               </Link>
             ))}
+            {isAdminUser && (
+              <Link
+                to="/members"
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === '/members'
+                    ? 'bg-green-900 text-white'
+                    : 'hover:bg-green-600 text-green-100'
+                }`}
+              >
+                회원 관리
+              </Link>
+            )}
             {isAdminUser && (
               <Link
                 to="/admin"

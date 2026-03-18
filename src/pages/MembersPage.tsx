@@ -95,6 +95,10 @@ export default function MembersPage() {
   const [showInactive, setShowInactive] = useState(false);
   const { isAdminUser } = useAuth();
 
+  if (!isAdminUser) {
+    return <div className="text-center py-16 text-slate-500">접근 권한이 없습니다.</div>;
+  }
+
   const load = async () => {
     const data = await getMembers();
     setMembers(data);
