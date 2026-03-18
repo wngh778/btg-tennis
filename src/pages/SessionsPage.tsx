@@ -31,6 +31,7 @@ function NewSessionForm({ onSave, onCancel }: { onSave: () => void; onCancel: ()
       mixedRounds: type === 'quarterly' ? 0 : mixedRounds,
       votingDeadline,
       isGenerated: false,
+      isConfirmed: false,
     });
     setLoading(false);
     onSave();

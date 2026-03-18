@@ -28,6 +28,7 @@ export interface Session {
   mixedRounds: number; // 혼복 라운드 수 (weekly only)
   votingDeadline: string; // ISO date string
   isGenerated: boolean;
+  isConfirmed: boolean;
   createdAt: Date;
 }
 

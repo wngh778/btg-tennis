@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
   setAttendance, deleteAttendance, addGuest, deleteGuest,
-  getMatches, saveMatches, updateMatchScore, updateSession, getAllMatches, updateMatch,
+  getMatches, saveMatches, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { generateMatches, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
@@ -36,7 +36,7 @@ export default function SessionDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'vote' | 'bracket' | 'detail'>('vote');
+  const [tab, setTab] = useState<'vote' | 'bracket' | 'detail' | 'result'>('vote');
 
   // Bracket editing
   const [editMode, setEditMode] = useState(false);
@@ -147,6 +147,13 @@ export default function SessionDetailPage() {
   const handleScoreUpdate = async (matchId: string, score1: string, score2: string) => {
     await updateMatchScore(matchId, score1, score2);
     load();
+  };
+
+  const handleConfirm = async () => {
+    if (!confirm('대진표를 확정하시겠습니까? 확정 후에는 스코어를 수정할 수 없습니다.')) return;
+    await confirmSession(session!.id);
+    load();
+    setTab('result');
   };
 
   // --- Bracket Editing ---
@@ -290,6 +297,16 @@ export default function SessionDetailPage() {
         >
           참석인원상세
         </button>
+        {session.isConfirmed && (
+          <button
+            onClick={() => setTab('result')}
+            className={`flex-1 py-3 text-sm font-medium transition-colors ${
+              tab === 'result' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            결과 🏆
+          </button>
+        )}
       </div>
 
       {/* Vote Tab */}
@@ -470,6 +487,14 @@ export default function SessionDetailPage() {
                   </button>
                 </>
               )}
+              {isAdminUser && !editMode && session.isGenerated && !session.isConfirmed && (
+                <button
+                  onClick={handleConfirm}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  확정
+                </button>
+              )}
               {isAdminUser && !editMode && (
                 <button
                   onClick={handleGenerate}
@@ -481,6 +506,11 @@ export default function SessionDetailPage() {
             </div>
           </div>
 
+          {session.isConfirmed && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-700">
+              ✓ 확정된 결과입니다. 스코어 수정이 잠겨 있습니다.
+            </div>
+          )}
           {editMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
               선수 이름을 클릭하여 위치를 바꿀 수 있습니다. 첫 번째 선수 선택 후 두 번째 선수를 클릭하면 위치가 교환됩니다.
@@ -499,7 +529,7 @@ export default function SessionDetailPage() {
                 round={round}
                 matches={matches.filter(m => m.round === round)}
                 attendingPlayers={attendingPlayers}
-                canEditScore={!!user}
+                canEditScore={!!user && !session.isConfirmed}
                 onScoreUpdate={handleScoreUpdate}
                 editMode={editMode}
                 pendingMatches={pendingMatches.filter(m => m.round === round)}
@@ -514,6 +544,11 @@ export default function SessionDetailPage() {
       {/* Detail Tab */}
       {tab === 'detail' && (
         <PlayerDetailTab attendingPlayers={attendingPlayers} matches={matches} />
+      )}
+
+      {/* Result Tab */}
+      {tab === 'result' && session.isConfirmed && (
+        <SessionResultTab attendingPlayers={attendingPlayers} matches={matches} />
       )}
     </div>
   );
@@ -616,6 +651,102 @@ function PlayerDetailTab({ attendingPlayers, matches }: { attendingPlayers: Play
           대진표가 생성되면 각 인원의 게임 배정 현황을 볼 수 있습니다.
         </div>
       )}
+    </div>
+  );
+}
+
+function SessionResultTab({ attendingPlayers, matches }: { attendingPlayers: Player[]; matches: Match[] }) {
+  type ResultStat = {
+    name: string;
+    gender: string;
+    wins: number;
+    losses: number;
+    games: number;
+  };
+
+  const stats = new Map<string, ResultStat>();
+
+  for (const p of attendingPlayers) {
+    stats.set(p.id, { name: p.name, gender: p.gender, wins: 0, losses: 0, games: 0 });
+  }
+
+  for (const m of matches) {
+    if (!m.isCompleted || m.score1 === undefined || m.score2 === undefined) continue;
+    const s1 = parseInt(m.score1, 10);
+    const s2 = parseInt(m.score2, 10);
+    if (isNaN(s1) || isNaN(s2)) continue;
+
+    const team1Players = [m.team1.player1, m.team1.player2];
+    const team2Players = [m.team2.player1, m.team2.player2];
+
+    const team1Won = s1 > s2;
+
+    for (const p of team1Players) {
+      if (!stats.has(p.id)) stats.set(p.id, { name: p.name, gender: p.gender, wins: 0, losses: 0, games: 0 });
+      const s = stats.get(p.id)!;
+      s.games++;
+      if (team1Won) s.wins++; else s.losses++;
+    }
+    for (const p of team2Players) {
+      if (!stats.has(p.id)) stats.set(p.id, { name: p.name, gender: p.gender, wins: 0, losses: 0, games: 0 });
+      const s = stats.get(p.id)!;
+      s.games++;
+      if (!team1Won) s.wins++; else s.losses++;
+    }
+  }
+
+  const sorted = [...stats.entries()]
+    .map(([id, s]) => ({ id, ...s, winRate: s.games > 0 ? Math.round((s.wins / s.games) * 100) : 0 }))
+    .sort((a, b) => b.wins - a.wins || b.winRate - a.winRate || a.name.localeCompare(b.name, 'ko'));
+
+  const completedMatches = matches.filter(m => m.isCompleted).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h2 className="font-semibold text-slate-700 mb-3">이번 경기 결과</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-slate-700">{matches.length}</p>
+            <p className="text-xs text-slate-500 mt-0.5">전체 매치</p>
+          </div>
+          <div className="bg-green-50 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-green-600">{completedMatches}</p>
+            <p className="text-xs text-green-500 mt-0.5">완료된 매치</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
+          <span className="text-xs font-semibold text-slate-500">이름</span>
+          <span className="text-xs font-semibold text-green-600 w-10 text-center">승</span>
+          <span className="text-xs font-semibold text-red-500 w-10 text-center">패</span>
+          <span className="text-xs font-semibold text-slate-500 w-12 text-center">게임</span>
+          <span className="text-xs font-semibold text-blue-600 w-14 text-center">승률</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {sorted.map((s, i) => (
+            <div key={s.id} className="px-5 py-3 grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold w-5 text-center ${i === 0 ? 'text-yellow-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-600' : 'text-slate-300'}`}>
+                  {i + 1}
+                </span>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${s.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                <span className="font-medium text-slate-800 text-sm">{s.name}</span>
+              </div>
+              <span className="text-sm font-bold text-green-600 w-10 text-center">{s.wins}</span>
+              <span className="text-sm text-red-400 w-10 text-center">{s.losses}</span>
+              <span className="text-sm text-slate-500 w-12 text-center">{s.games}</span>
+              <div className="w-14 text-center">
+                <span className={`text-sm font-bold ${s.winRate >= 70 ? 'text-green-600' : s.winRate >= 50 ? 'text-blue-600' : 'text-slate-500'}`}>
+                  {s.games > 0 ? `${s.winRate}%` : '-'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

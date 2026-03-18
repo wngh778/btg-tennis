@@ -63,6 +63,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     mixedRounds: row.mixed_rounds as number,
     votingDeadline: row.voting_deadline as string,
     isGenerated: row.is_generated as boolean,
+    isConfirmed: row.is_confirmed as boolean,
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -117,7 +118,13 @@ export async function updateSession(id: string, data: Partial<Omit<Session, 'id'
   if (data.mixedRounds !== undefined) update.mixed_rounds = data.mixedRounds;
   if (data.votingDeadline !== undefined) update.voting_deadline = data.votingDeadline;
   if (data.isGenerated !== undefined) update.is_generated = data.isGenerated;
+  if (data.isConfirmed !== undefined) update.is_confirmed = data.isConfirmed;
   const { error } = await supabase.from('sessions').update(update).eq('id', id);
+  if (error) throw error;
+}
+
+export async function confirmSession(id: string): Promise<void> {
+  const { error } = await supabase.from('sessions').update({ is_confirmed: true }).eq('id', id);
   if (error) throw error;
 }
 
