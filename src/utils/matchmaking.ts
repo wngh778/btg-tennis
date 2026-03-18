@@ -214,131 +214,104 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const history = buildHistory(pastMatches);
   const allMatches: Omit<Match, 'id'>[] = [];
 
-  const allMales = players.filter(p => p.gender === 'male').sort((a, b) => b.ntrp - a.ntrp);
-  const allFemales = players.filter(p => p.gender === 'female').sort((a, b) => b.ntrp - a.ntrp);
+  const males = players.filter(p => p.gender === 'male');
+  const females = players.filter(p => p.gender === 'female');
 
-  // 휴식 순환 큐 (쉰 선수가 다음 라운드 우선 배정)
-  let maleQueue = [...allMales];
-  let femaleQueue = [...allFemales];
+  // 게임 횟수 추적 - 적게 뛴 선수 우선 배정
+  const gameCounts = new Map<string, number>();
+  players.forEach(p => gameCounts.set(p.id, 0));
+
+  // 게임 횟수 적은 순 정렬 (동점이면 랜덤)
+  const byLeastGames = (arr: Player[]): Player[] =>
+    [...arr].sort((a, b) => {
+      const d = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
+      return d !== 0 ? d : Math.random() - 0.5;
+    });
+
+  const addGames = (ps: Player[]) =>
+    ps.forEach(p => gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1));
 
   for (let round = 1; round <= totalRounds; round++) {
     const roundMatches: Array<{ team1: Team; team2: Team; matchType: MatchType; court: number }> = [];
     let courtNum = 1;
 
     if (sessionType === 'quarterly') {
-      // 분기대회: 홀수 라운드=남복, 짝수 라운드=여복 (코트 전체 단일 타입)
       const matchType: MatchType = round % 2 === 1 ? 'male' : 'female';
-      const queue = matchType === 'male' ? maleQueue : femaleQueue;
-      const activeCourts = Math.min(courts, Math.floor(queue.length / 4));
+      const pool = byLeastGames(matchType === 'male' ? males : females);
+      const activeCourts = Math.min(courts, Math.floor(pool.length / 4));
       if (activeCourts > 0) {
-        const { matches, resting } = generateSameGenderRound(queue, history, activeCourts, matchType);
-        for (const m of matches) {
-          roundMatches.push({ ...m, court: courtNum++ });
-        }
-        const restIds = new Set(resting.map(p => p.id));
-        if (matchType === 'male') {
-          maleQueue = [...allMales.filter(p => restIds.has(p.id)), ...allMales.filter(p => !restIds.has(p.id))];
-        } else {
-          femaleQueue = [...allFemales.filter(p => restIds.has(p.id)), ...allFemales.filter(p => !restIds.has(p.id))];
-        }
+        const playing = pool.slice(0, activeCourts * 4);
+        const { matches } = generateSameGenderRound(playing, history, activeCourts, matchType);
+        matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+        addGames(playing);
       }
     } else {
-      // 주간 경기: 한 라운드 안에 남복+여복 코트가 동시에 돌아감
-      const isMixedRound = round <= mixedRounds;
+      const isMixed = round <= mixedRounds;
 
-      if (isMixedRound) {
-        // 혼복 라운드: 혼복 코트 최대화 (코트당 남2+여2 필요), 남는 남자는 남복
-        const mixedCourtCount = Math.min(
-          courts,
-          Math.floor(maleQueue.length / 2),
-          Math.floor(femaleQueue.length / 2),
-        );
+      if (isMixed) {
+        const sm = byLeastGames(males);
+        const sf = byLeastGames(females);
+        const mixedCourts = Math.min(courts, Math.floor(sm.length / 2), Math.floor(sf.length / 2));
 
-        if (mixedCourtCount > 0) {
-          const { matches, restingMales, restingFemales } = generateMixedRound(
-            maleQueue, femaleQueue, history, mixedCourtCount,
-          );
-          for (const m of matches) {
-            roundMatches.push({ ...m, court: courtNum++ });
-          }
+        const mixedMaleIds = new Set<string>();
+        const mixedFemaleIds = new Set<string>();
 
-          // 남은 남자 → 남복
-          const maleCourtsCount = Math.floor(restingMales.length / 4);
-          if (maleCourtsCount > 0) {
-            const { matches: maleMatches, resting } = generateSameGenderRound(restingMales, history, maleCourtsCount, 'male');
-            for (const m of maleMatches) {
-              roundMatches.push({ ...m, court: courtNum++ });
-            }
-            const restIds = new Set(resting.map(p => p.id));
-            const mixedMaleIds = new Set(maleQueue.slice(0, mixedCourtCount * 2).map(p => p.id));
-            maleQueue = [
-              ...allMales.filter(p => restIds.has(p.id)),
-              ...allMales.filter(p => !restIds.has(p.id) && !mixedMaleIds.has(p.id)),
-              ...allMales.filter(p => mixedMaleIds.has(p.id)),
-            ];
-          } else {
-            const mixedMaleIds = new Set(maleQueue.slice(0, mixedCourtCount * 2).map(p => p.id));
-            maleQueue = [
-              ...allMales.filter(p => !mixedMaleIds.has(p.id)),
-              ...allMales.filter(p => mixedMaleIds.has(p.id)),
-            ];
-          }
+        if (mixedCourts > 0) {
+          const mixedM = sm.slice(0, mixedCourts * 2);
+          const mixedF = sf.slice(0, mixedCourts * 2);
+          mixedM.forEach(p => mixedMaleIds.add(p.id));
+          mixedF.forEach(p => mixedFemaleIds.add(p.id));
+          const { matches: mx } = generateMixedRound(mixedM, mixedF, history, mixedCourts);
+          mx.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+          addGames([...mixedM, ...mixedF]);
+        }
 
-          // 남은 여자 → 여복
-          const femaleCourtsCount = Math.floor(restingFemales.length / 4);
-          if (femaleCourtsCount > 0) {
-            const { matches: femaleMatches, resting } = generateSameGenderRound(restingFemales, history, femaleCourtsCount, 'female');
-            for (const m of femaleMatches) {
-              roundMatches.push({ ...m, court: courtNum++ });
-            }
-            const restIds = new Set(resting.map(p => p.id));
-            const mixedFemaleIds = new Set(femaleQueue.slice(0, mixedCourtCount * 2).map(p => p.id));
-            femaleQueue = [
-              ...allFemales.filter(p => restIds.has(p.id)),
-              ...allFemales.filter(p => !restIds.has(p.id) && !mixedFemaleIds.has(p.id)),
-              ...allFemales.filter(p => mixedFemaleIds.has(p.id)),
-            ];
-          } else {
-            const mixedFemaleIds = new Set(femaleQueue.slice(0, mixedCourtCount * 2).map(p => p.id));
-            femaleQueue = [
-              ...allFemales.filter(p => !mixedFemaleIds.has(p.id)),
-              ...allFemales.filter(p => mixedFemaleIds.has(p.id)),
-            ];
-          }
+        // 남은 남자 → 남복 (남은 코트 수 제한)
+        const remMales = byLeastGames(males.filter(p => !mixedMaleIds.has(p.id)));
+        const maleCourts = Math.min(courts - mixedCourts, Math.floor(remMales.length / 4));
+        if (maleCourts > 0) {
+          const playing = remMales.slice(0, maleCourts * 4);
+          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male');
+          matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+          addGames(playing);
+        }
+
+        // 남은 여자 → 여복 (남은 코트 수 제한)
+        const remFemales = byLeastGames(females.filter(p => !mixedFemaleIds.has(p.id)));
+        const femaleCourts = Math.min(courts - mixedCourts - maleCourts, Math.floor(remFemales.length / 4));
+        if (femaleCourts > 0) {
+          const playing = remFemales.slice(0, femaleCourts * 4);
+          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female');
+          matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+          addGames(playing);
         }
       } else {
-        // 비혼복 라운드: 남자는 남복 + 여자는 여복 → 같은 라운드, 다른 코트에서 동시 진행
-        const maleCourtsCount = Math.min(courts, Math.floor(maleQueue.length / 4));
-        if (maleCourtsCount > 0) {
-          const { matches, resting } = generateSameGenderRound(maleQueue, history, maleCourtsCount, 'male');
-          for (const m of matches) {
-            roundMatches.push({ ...m, court: courtNum++ });
-          }
-          const restIds = new Set(resting.map(p => p.id));
-          maleQueue = [...allMales.filter(p => restIds.has(p.id)), ...allMales.filter(p => !restIds.has(p.id))];
+        // 비혼복 라운드: 남복 + 여복 동시 진행
+        const sm = byLeastGames(males);
+        const maleCourts = Math.min(courts, Math.floor(sm.length / 4));
+        if (maleCourts > 0) {
+          const playing = sm.slice(0, maleCourts * 4);
+          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male');
+          matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+          addGames(playing);
         }
 
-        const remainingCourts = courts - (courtNum - 1);
-        const femaleCourtsCount = Math.min(remainingCourts, Math.floor(femaleQueue.length / 4));
-        if (femaleCourtsCount > 0) {
-          const { matches, resting } = generateSameGenderRound(femaleQueue, history, femaleCourtsCount, 'female');
-          for (const m of matches) {
-            roundMatches.push({ ...m, court: courtNum++ });
-          }
-          const restIds = new Set(resting.map(p => p.id));
-          femaleQueue = [...allFemales.filter(p => restIds.has(p.id)), ...allFemales.filter(p => !restIds.has(p.id))];
+        const sf = byLeastGames(females);
+        const femaleCourts = Math.min(courts - (courtNum - 1), Math.floor(sf.length / 4));
+        if (femaleCourts > 0) {
+          const playing = sf.slice(0, femaleCourts * 4);
+          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female');
+          matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
+          addGames(playing);
         }
       }
     }
 
     for (const m of roundMatches) {
       allMatches.push({
-        sessionId,
-        round,
-        court: m.court,
+        sessionId, round, court: m.court,
         matchType: m.matchType,
-        team1: m.team1,
-        team2: m.team2,
+        team1: m.team1, team2: m.team2,
         isCompleted: false,
       });
     }
