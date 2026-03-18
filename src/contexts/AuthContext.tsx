@@ -26,10 +26,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        const appUserData = await getAppUser(session.user.id);
-        setAppUser(appUserData);
-        setIsAdminUser(appUserData?.role === 'admin');
+        try {
+          const appUserData = await getAppUser(session.user.id);
+          setAppUser(appUserData);
+          setIsAdminUser(appUserData?.role === 'admin');
+        } catch (e) {
+          console.error('getAppUser error:', e);
+        }
       }
+      setLoading(false);
+    }).catch(e => {
+      console.error('getSession error:', e);
       setLoading(false);
     });
 

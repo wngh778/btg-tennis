@@ -47,7 +47,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
             {user ? (
               <button
-                onClick={logout}
+                onClick={() => logout().catch(e => { console.error('logout error:', e); alert('로그아웃 실패: ' + e.message); })}
                 className="ml-2 px-3 py-1.5 rounded-md text-sm font-medium bg-green-900 hover:bg-green-800 transition-colors"
               >
                 로그아웃

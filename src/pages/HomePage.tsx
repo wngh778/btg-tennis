@@ -13,11 +13,13 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getSessions().then(sessions => {
-      const upcoming = sessions.find(s => s.date >= new Date().toISOString().split('T')[0]);
-      setLatestSession(upcoming || sessions[0] || null);
-      setLoading(false);
-    });
+    getSessions()
+      .then(sessions => {
+        const upcoming = sessions.find(s => s.date >= new Date().toISOString().split('T')[0]);
+        setLatestSession(upcoming || sessions[0] || null);
+      })
+      .catch(err => console.error('getSessions error:', err))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
