@@ -62,12 +62,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </Link>
             )}
             {user ? (
-              <button
-                onClick={() => logout().catch(e => { console.error('logout error:', e); alert('로그아웃 실패: ' + e.message); })}
-                className="ml-2 px-3 py-1.5 rounded-md text-sm font-medium bg-green-900 hover:bg-green-800 transition-colors"
-              >
-                로그아웃
-              </button>
+              <>
+                <Link
+                  to="/account"
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    location.pathname === '/account'
+                      ? 'bg-green-900 text-white'
+                      : 'hover:bg-green-600 text-green-100'
+                  }`}
+                >
+                  내 계정
+                </Link>
+                <button
+                  onClick={() => logout().catch(e => { console.error('logout error:', e); alert('로그아웃 실패: ' + e.message); })}
+                  className="ml-1 px-3 py-1.5 rounded-md text-sm font-medium bg-green-900 hover:bg-green-800 transition-colors"
+                >
+                  로그아웃
+                </button>
+              </>
             ) : (
               <Link
                 to="/login"

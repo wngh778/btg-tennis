@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { supabaseAdmin } from './supabaseAdmin';
 import type { Member, Session, AttendanceRecord, Match, Guest, AppUser } from '../types';
 
 // username → email conversion (same as before)
@@ -360,4 +361,11 @@ export async function isAdmin(uid: string): Promise<boolean> {
     .single();
   if (error) return false;
   return data?.role === 'admin';
+}
+
+// --- Password Management ---
+export async function resetUserPassword(userId: string): Promise<void> {
+  if (!supabaseAdmin) throw new Error('SERVICE_ROLE_KEY가 설정되지 않았습니다.');
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: '123456' });
+  if (error) throw error;
 }

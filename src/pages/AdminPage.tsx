@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getAllAppUsers, deleteAppUser, usernameToEmail, getMembers } from '../lib/database';
+import { getAllAppUsers, deleteAppUser, usernameToEmail, getMembers, resetUserPassword } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import type { AppUser } from '../types';
@@ -119,6 +119,16 @@ export default function AdminPage() {
     }
   };
 
+  const handleResetPassword = async (u: AppUser) => {
+    if (!confirm(`"${u.username}" 계정의 비밀번호를 123456으로 초기화하시겠습니까?`)) return;
+    try {
+      await resetUserPassword(u.id);
+      alert(`"${u.username}" 비밀번호가 123456으로 초기화되었습니다.`);
+    } catch (err: unknown) {
+      alert('초기화 실패: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleDeleteAppUser = async (u: AppUser) => {
     if (!confirm(`"${u.username}" 계정을 삭제하시겠습니까?\n(Supabase Auth 계정은 서비스 역할 키가 필요하여 앱 사용자 기록만 삭제됩니다)`)) return;
     await deleteAppUser(u.id);
@@ -154,6 +164,12 @@ export default function AdminPage() {
                   }`}>
                     {u.role === 'admin' ? '관리자' : '회원'}
                   </span>
+                  <button
+                    onClick={() => handleResetPassword(u)}
+                    className="text-amber-500 hover:text-amber-700 text-sm"
+                  >
+                    비번초기화
+                  </button>
                   <button
                     onClick={() => handleDeleteAppUser(u)}
                     className="text-red-400 hover:text-red-600 text-sm"
