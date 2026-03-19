@@ -343,7 +343,7 @@ export default function SessionDetailPage() {
               <h2 className="font-semibold text-slate-700">회원 참석 여부</h2>
               <span className="text-sm text-slate-400">{activeMembers.length}명</span>
             </div>
-            <div style={{ maxHeight: '384px', overflowY: 'auto' }}>
+            <div className="scrollable-box" style={{ maxHeight: '384px' }}>
               <div className="divide-y divide-slate-100">
               {activeMembers.map(m => {
                 const rec = attendance.find(a => a.playerId === m.id);

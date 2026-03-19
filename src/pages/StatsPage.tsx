@@ -221,7 +221,7 @@ export default function StatsPage() {
         ) : stats.length === 0 ? (
           <div className="text-center py-10 text-slate-400">완료된 경기가 없습니다.</div>
         ) : (
-          <div style={{ maxHeight: '60vh', overflowY: 'auto' }} className="overflow-x-auto">
+          <div className="scrollable-box overflow-x-auto" style={{ maxHeight: '400px' }}>
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-white z-10">
                 <tr className="border-b border-slate-100 text-slate-500">

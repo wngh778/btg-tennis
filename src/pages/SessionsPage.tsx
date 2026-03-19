@@ -180,7 +180,7 @@ export default function SessionsPage() {
           {past.length > 0 && (
             <div className="mt-4">
               <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">지난 경기</h2>
-              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              <div className="scrollable-box space-y-3 pr-1" style={{ maxHeight: '320px' }}>
                 {past.map(s => (
                   <SessionCard key={s.id} session={s} onDelete={handleDelete} isAdmin={isAdminUser} />
                 ))}
