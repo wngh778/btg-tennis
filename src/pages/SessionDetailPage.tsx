@@ -338,12 +338,13 @@ export default function SessionDetailPage() {
           )}
 
           {/* Member list */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex items-center justify-between">
               <h2 className="font-semibold text-slate-700">회원 참석 여부</h2>
               <span className="text-sm text-slate-400">{activeMembers.length}명</span>
             </div>
-            <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            <div style={{ maxHeight: '384px', overflowY: 'auto' }}>
+              <div className="divide-y divide-slate-100">
               {activeMembers.map(m => {
                 const rec = attendance.find(a => a.playerId === m.id);
                 const attending = rec?.attending ?? null;
@@ -385,6 +386,7 @@ export default function SessionDetailPage() {
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
 

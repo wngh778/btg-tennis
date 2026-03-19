@@ -175,11 +175,12 @@ export default function MembersPage() {
       ) : (
         <div className="grid md:grid-cols-2 gap-4">
           {[{ label: '남성', list: males }, { label: '여성', list: females }].map(({ label, list }) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+            <div key={label} className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+              <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex items-center justify-between">
                 <h2 className="font-semibold text-slate-700">{label} ({list.length}명)</h2>
               </div>
-              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+              <div style={{ maxHeight: '384px', overflowY: 'auto' }}>
+                <div className="divide-y divide-slate-100">
                 {list.length === 0 ? (
                   <p className="px-5 py-6 text-slate-400 text-sm text-center">회원이 없습니다.</p>
                 ) : (
@@ -223,6 +224,7 @@ export default function MembersPage() {
                     </div>
                   ))
                 )}
+                </div>
               </div>
             </div>
           ))}

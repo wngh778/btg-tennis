@@ -133,11 +133,12 @@ export default function AdminPage() {
       <h1 className="text-xl font-bold text-slate-800">관리자 설정</h1>
 
       {/* App Users */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl">
           <h2 className="font-semibold text-slate-700">앱 사용자 ({appUsers.length}명)</h2>
         </div>
-        <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+        <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+          <div className="divide-y divide-slate-100">
           {appUsers.length === 0 ? (
             <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 사용자가 없습니다.</p>
           ) : (
@@ -163,6 +164,7 @@ export default function AdminPage() {
               </div>
             ))
           )}
+          </div>
         </div>
       </div>
 

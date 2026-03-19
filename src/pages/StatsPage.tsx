@@ -204,8 +204,8 @@ export default function StatsPage() {
       </div>
 
       {/* Stats table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl">
           <h2 className="font-semibold text-slate-700">선수별 전적 ({stats.length}명)</h2>
         </div>
 
@@ -221,7 +221,7 @@ export default function StatsPage() {
         ) : stats.length === 0 ? (
           <div className="text-center py-10 text-slate-400">완료된 경기가 없습니다.</div>
         ) : (
-          <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }} className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-white z-10">
                 <tr className="border-b border-slate-100 text-slate-500">
