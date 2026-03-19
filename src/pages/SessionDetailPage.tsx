@@ -27,7 +27,7 @@ type SelectedPlayer = {
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { user, isAdminUser, loading: authLoading } = useAuth();
+  const { user, appUser, isAdminUser, loading: authLoading } = useAuth();
 
   const [session, setSession] = useState<Session | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -255,6 +255,17 @@ export default function SessionDetailPage() {
   const maleAttending = attendingPlayers.filter(p => p.gender === 'male').length;
   const femaleAttending = attendingPlayers.filter(p => p.gender === 'female').length;
 
+  // 본인 계정에 연결된 멤버 (username === member.name)
+  const myMember = appUser ? activeMembers.find(m => m.name === appUser.username) ?? null : null;
+  const myAttendance = myMember ? attendance.find(a => a.playerId === myMember.id)?.attending ?? null : null;
+
+  // 관리자: 모든 멤버 투표 가능 / 일반 유저: 본인만 가능
+  const canVoteForMember = (memberId: string) => {
+    if (!canVote) return false;
+    if (isAdminUser) return true;
+    return myMember?.id === memberId;
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -337,6 +348,62 @@ export default function SessionDetailPage() {
             </div>
           )}
 
+          {/* 내 참석 투표 박스 */}
+          {user && myMember && (
+            <div className={`rounded-2xl border-2 p-5 ${
+              myAttendance === true ? 'bg-green-50 border-green-300' :
+              myAttendance === false ? 'bg-red-50 border-red-200' :
+              'bg-white border-slate-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-slate-500 mb-0.5">내 참석 여부</p>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${myMember.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                    <p className="text-lg font-bold text-slate-800">{myMember.name}</p>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {myAttendance === true ? '✅ 참석 예정' : myAttendance === false ? '❌ 불참' : '미응답'}
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => canVote && handleMemberVote(myMember, true)}
+                    disabled={!canVote}
+                    className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                      myAttendance === true
+                        ? 'bg-green-500 text-white shadow-sm'
+                        : canVote
+                        ? 'bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700'
+                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    참석
+                  </button>
+                  <button
+                    onClick={() => canVote && handleMemberVote(myMember, false)}
+                    disabled={!canVote}
+                    className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                      myAttendance === false
+                        ? 'bg-red-400 text-white shadow-sm'
+                        : canVote
+                        ? 'bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-500'
+                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    불참
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {user && !myMember && !isAdminUser && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-500 text-center">
+              계정({appUser?.username})과 연결된 회원을 찾을 수 없습니다. 관리자에게 문의하세요.
+            </div>
+          )}
+
           {/* Member list */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex items-center justify-between">
@@ -348,36 +415,39 @@ export default function SessionDetailPage() {
               {activeMembers.map(m => {
                 const rec = attendance.find(a => a.playerId === m.id);
                 const attending = rec?.attending ?? null;
+                const canVoteThis = canVoteForMember(m.id);
+                const isMe = m.id === myMember?.id;
                 return (
-                  <div key={m.id} className="px-5 py-3 flex items-center justify-between">
+                  <div key={m.id} className={`px-5 py-3 flex items-center justify-between ${isMe ? 'bg-green-50' : ''}`}>
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                      <span className="font-medium text-slate-800">{m.name}</span>
+                      <span className={`font-medium ${isMe ? 'text-green-700' : 'text-slate-800'}`}>{m.name}</span>
+                      {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                       {isAdminUser && <span className="text-xs font-mono text-slate-400">{m.ntrp.toFixed(1)}</span>}
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => canVote && handleMemberVote(m, true)}
-                        disabled={!canVote}
+                        onClick={() => canVoteThis && handleMemberVote(m, true)}
+                        disabled={!canVoteThis}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                           attending === true
                             ? 'bg-green-500 text-white'
-                            : canVote
+                            : canVoteThis
                             ? 'bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700'
-                            : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-50 text-slate-300 cursor-not-allowed'
                         }`}
                       >
                         참석
                       </button>
                       <button
-                        onClick={() => canVote && handleMemberVote(m, false)}
-                        disabled={!canVote}
+                        onClick={() => canVoteThis && handleMemberVote(m, false)}
+                        disabled={!canVoteThis}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                           attending === false
                             ? 'bg-red-400 text-white'
-                            : canVote
+                            : canVoteThis
                             ? 'bg-slate-100 text-slate-600 hover:bg-red-100 hover:text-red-600'
-                            : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-50 text-slate-300 cursor-not-allowed'
                         }`}
                       >
                         불참
