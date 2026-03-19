@@ -137,7 +137,7 @@ export default function AdminPage() {
         <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
           <h2 className="font-semibold text-slate-700">앱 사용자 ({appUsers.length}명)</h2>
         </div>
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
           {appUsers.length === 0 ? (
             <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 사용자가 없습니다.</p>
           ) : (

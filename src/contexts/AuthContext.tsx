@@ -22,38 +22,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    // 안전장치: 8초 안에 초기화가 안 되면 강제 해제
+    const safetyTimer = setTimeout(() => {
+      console.warn('Auth init timed out, clearing local storage');
+      try {
+        const keys: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('sb-')) keys.push(key);
+        }
+        keys.forEach(k => localStorage.removeItem(k));
+      } catch (_) { /* ignore */ }
+      setUser(null);
+      setAppUser(null);
+      setIsAdminUser(false);
+      setLoading(false);
+    }, 8000);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      clearTimeout(safetyTimer);
       setUser(session?.user ?? null);
+
       if (session?.user) {
         try {
-          const appUserData = await getAppUser(session.user.id);
+          // getAppUser에 타임아웃 적용: 5초 이상 걸리면 null 반환
+          const appUserData = await Promise.race([
+            getAppUser(session.user.id),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+          ]);
           setAppUser(appUserData);
           setIsAdminUser(appUserData?.role === 'admin');
         } catch (e) {
           console.error('getAppUser error:', e);
+          setAppUser(null);
+          setIsAdminUser(false);
         }
-      }
-      setLoading(false);
-    }).catch(e => {
-      console.error('getSession error:', e);
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        const appUserData = await getAppUser(session.user.id);
-        setAppUser(appUserData);
-        setIsAdminUser(appUserData?.role === 'admin');
       } else {
         setAppUser(null);
         setIsAdminUser(false);
       }
+
+      // getAppUser 완료 후 loading 해제 (race condition 방지)
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (username: string, password: string) => {

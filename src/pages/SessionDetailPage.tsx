@@ -343,7 +343,7 @@ export default function SessionDetailPage() {
               <h2 className="font-semibold text-slate-700">회원 참석 여부</h2>
               <span className="text-sm text-slate-400">{activeMembers.length}명</span>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
               {activeMembers.map(m => {
                 const rec = attendance.find(a => a.playerId === m.id);
                 const attending = rec?.attending ?? null;

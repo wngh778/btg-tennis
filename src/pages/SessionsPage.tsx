@@ -117,15 +117,20 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const { isAdminUser } = useAuth();
+  const { isAdminUser, loading: authLoading } = useAuth();
 
   const load = async () => {
-    const data = await getSessions();
-    setSessions(data);
-    setLoading(false);
+    try {
+      const data = await getSessions();
+      setSessions(data);
+    } catch (e) {
+      console.error('sessions load error:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!authLoading) load(); }, [authLoading]);
 
   const handleDelete = async (id: string, date: string) => {
     if (!confirm(`${formatDate(date)} 경기를 삭제하시겠습니까?`)) return;
@@ -175,7 +180,7 @@ export default function SessionsPage() {
           {past.length > 0 && (
             <div className="mt-4">
               <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">지난 경기</h2>
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                 {past.map(s => (
                   <SessionCard key={s.id} session={s} onDelete={handleDelete} isAdmin={isAdminUser} />
                 ))}

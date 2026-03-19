@@ -31,6 +31,7 @@ export default function StatsPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const cachedData = useRef<CachedData | null>(null);
 
   const computeStats = (
@@ -72,21 +73,12 @@ export default function StatsPage() {
       const team2Players = [m.team2.player1, m.team2.player2];
 
       if (s1 > s2) {
-        team1Players.forEach(p => {
-          const s = ensurePlayer(p.id);
-          s.wins += 1;
-          s.points += 3;
-        });
+        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
         team2Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
       } else if (s2 > s1) {
-        team2Players.forEach(p => {
-          const s = ensurePlayer(p.id);
-          s.wins += 1;
-          s.points += 3;
-        });
+        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
         team1Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
       } else {
-        // 동점
         [...team1Players, ...team2Players].forEach(p => {
           const s = ensurePlayer(p.id);
           s.draws += 1;
@@ -95,22 +87,12 @@ export default function StatsPage() {
       }
     });
 
-    // Players with attendance but no match data still need to appear when sessionId === 'all'
     if (sessionId === 'all') {
       attendanceCounts.forEach((count, playerId) => {
         if (!statMap.has(playerId)) {
           const info = playerInfo.get(playerId);
           if (info) {
-            statMap.set(playerId, {
-              id: playerId,
-              name: info.name,
-              gender: info.gender,
-              wins: 0,
-              draws: 0,
-              losses: 0,
-              points: 0,
-              attendanceCount: count,
-            });
+            statMap.set(playerId, { id: playerId, name: info.name, gender: info.gender, wins: 0, draws: 0, losses: 0, points: 0, attendanceCount: count });
           }
         }
       });
@@ -122,16 +104,16 @@ export default function StatsPage() {
       const bTotal = b.wins + b.draws + b.losses;
       const aRate = aTotal > 0 ? a.wins / aTotal : 0;
       const bRate = bTotal > 0 ? b.wins / bTotal : 0;
-      if (bRate !== aRate) return bRate - aRate;
-      return b.wins - a.wins;
+      return bRate - aRate || b.wins - a.wins;
     });
 
     setStats(result);
   };
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
+  const fetchData = async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
       const [allMatches, members, allSessions, allAttendance] = await Promise.all([
         getAllMatches(),
         getMembers(),
@@ -143,16 +125,12 @@ export default function StatsPage() {
 
       const playerInfo = new Map<string, { name: string; gender: 'male' | 'female' }>();
       members.forEach(m => playerInfo.set(m.id, { name: m.name, gender: m.gender }));
-
       allMatches.forEach(m => {
         [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2].forEach(p => {
-          if (!playerInfo.has(p.id)) {
-            playerInfo.set(p.id, { name: p.name, gender: p.gender });
-          }
+          if (!playerInfo.has(p.id)) playerInfo.set(p.id, { name: p.name, gender: p.gender });
         });
       });
 
-      // Build attendance count map (playerId → session count)
       const attendanceCounts = new Map<string, number>();
       allAttendance.forEach(a => {
         attendanceCounts.set(a.playerId, (attendanceCounts.get(a.playerId) ?? 0) + 1);
@@ -160,24 +138,23 @@ export default function StatsPage() {
 
       cachedData.current = { allMatches, playerInfo, attendanceCounts };
       computeStats(allMatches, playerInfo, attendanceCounts, 'all');
+    } catch (e) {
+      console.error('stats load error:', e);
+      setLoadError(true);
+    } finally {
       setLoading(false);
-    };
-    fetchData();
-  }, []);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
 
   const handleSessionChange = (sessionId: string) => {
     setSelectedSessionId(sessionId);
     if (cachedData.current) {
-      computeStats(
-        cachedData.current.allMatches,
-        cachedData.current.playerInfo,
-        cachedData.current.attendanceCounts,
-        sessionId
-      );
+      computeStats(cachedData.current.allMatches, cachedData.current.playerInfo, cachedData.current.attendanceCounts, sessionId);
     }
   };
 
-  // 현재 로그인 유저의 개인 통계
   const myUsername = appUser?.username;
   const myStat = myUsername ? stats.find(s => s.name === myUsername) : null;
 
@@ -185,7 +162,7 @@ export default function StatsPage() {
     <div className="space-y-4 max-w-2xl">
       <h1 className="text-xl font-bold text-slate-800">전적 현황</h1>
 
-      {/* 개인 통계 카드 (로그인한 회원) */}
+      {/* 개인 통계 카드 */}
       {myStat && (
         <div className="bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl p-5 shadow-md">
           <p className="text-green-100 text-sm mb-1">내 전적</p>
@@ -234,12 +211,19 @@ export default function StatsPage() {
 
         {loading ? (
           <div className="text-center py-10 text-slate-500">불러오는 중...</div>
+        ) : loadError ? (
+          <div className="text-center py-10">
+            <p className="text-slate-500 mb-3">불러오기 실패</p>
+            <button onClick={fetchData} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
+              다시 시도
+            </button>
+          </div>
         ) : stats.length === 0 ? (
           <div className="text-center py-10 text-slate-400">완료된 경기가 없습니다.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 bg-white z-10">
                 <tr className="border-b border-slate-100 text-slate-500">
                   <th className="px-4 py-2.5 text-left font-medium">순위</th>
                   <th className="px-4 py-2.5 text-left font-medium">이름</th>
@@ -268,9 +252,7 @@ export default function StatsPage() {
                           {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-center">
-                        <span className="font-bold text-blue-600">{s.points}</span>
-                      </td>
+                      <td className="px-3 py-3 text-center"><span className="font-bold text-blue-600">{s.points}</span></td>
                       <td className="px-3 py-3 text-center font-medium text-green-600">{s.wins}</td>
                       <td className="px-3 py-3 text-center text-slate-500">{s.draws}</td>
                       <td className="px-3 py-3 text-center text-red-400">{s.losses}</td>
