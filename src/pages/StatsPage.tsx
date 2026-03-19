@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { getAllMatches, getMembers, getSessions } from '../lib/database';
+import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib/database';
+import { useAuth } from '../contexts/AuthContext';
 import type { Match, Session } from '../types';
 
 function formatDate(dateStr: string) {
@@ -12,15 +13,20 @@ interface PlayerStat {
   name: string;
   gender: 'male' | 'female';
   wins: number;
+  draws: number;
   losses: number;
+  points: number;
+  attendanceCount: number;
 }
 
 interface CachedData {
   allMatches: Match[];
   playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>;
+  attendanceCounts: Map<string, number>;
 }
 
 export default function StatsPage() {
+  const { appUser, isAdminUser } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
   const [stats, setStats] = useState<PlayerStat[]>([]);
@@ -30,6 +36,7 @@ export default function StatsPage() {
   const computeStats = (
     allMatches: Match[],
     playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>,
+    attendanceCounts: Map<string, number>,
     sessionId: string
   ) => {
     const filtered = sessionId === 'all'
@@ -46,7 +53,10 @@ export default function StatsPage() {
           name: info?.name ?? id,
           gender: info?.gender ?? 'male',
           wins: 0,
+          draws: 0,
           losses: 0,
+          points: 0,
+          attendanceCount: attendanceCounts.get(id) ?? 0,
         });
       }
       return statMap.get(id)!;
@@ -62,19 +72,54 @@ export default function StatsPage() {
       const team2Players = [m.team2.player1, m.team2.player2];
 
       if (s1 > s2) {
-        team1Players.forEach(p => { ensurePlayer(p.id).wins += 1; });
+        team1Players.forEach(p => {
+          const s = ensurePlayer(p.id);
+          s.wins += 1;
+          s.points += 3;
+        });
         team2Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
       } else if (s2 > s1) {
-        team2Players.forEach(p => { ensurePlayer(p.id).wins += 1; });
+        team2Players.forEach(p => {
+          const s = ensurePlayer(p.id);
+          s.wins += 1;
+          s.points += 3;
+        });
         team1Players.forEach(p => { ensurePlayer(p.id).losses += 1; });
       } else {
-        [...team1Players, ...team2Players].forEach(p => { ensurePlayer(p.id); });
+        // 동점
+        [...team1Players, ...team2Players].forEach(p => {
+          const s = ensurePlayer(p.id);
+          s.draws += 1;
+          s.points += 1;
+        });
       }
     });
 
+    // Players with attendance but no match data still need to appear when sessionId === 'all'
+    if (sessionId === 'all') {
+      attendanceCounts.forEach((count, playerId) => {
+        if (!statMap.has(playerId)) {
+          const info = playerInfo.get(playerId);
+          if (info) {
+            statMap.set(playerId, {
+              id: playerId,
+              name: info.name,
+              gender: info.gender,
+              wins: 0,
+              draws: 0,
+              losses: 0,
+              points: 0,
+              attendanceCount: count,
+            });
+          }
+        }
+      });
+    }
+
     const result = Array.from(statMap.values()).sort((a, b) => {
-      const aTotal = a.wins + a.losses;
-      const bTotal = b.wins + b.losses;
+      if (b.points !== a.points) return b.points - a.points;
+      const aTotal = a.wins + a.draws + a.losses;
+      const bTotal = b.wins + b.draws + b.losses;
       const aRate = aTotal > 0 ? a.wins / aTotal : 0;
       const bRate = bTotal > 0 ? b.wins / bTotal : 0;
       if (bRate !== aRate) return bRate - aRate;
@@ -87,10 +132,11 @@ export default function StatsPage() {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const [allMatches, members, allSessions] = await Promise.all([
+      const [allMatches, members, allSessions, allAttendance] = await Promise.all([
         getAllMatches(),
         getMembers(),
         getSessions(),
+        getAllAttendance(),
       ]);
 
       setSessions(allSessions);
@@ -98,7 +144,6 @@ export default function StatsPage() {
       const playerInfo = new Map<string, { name: string; gender: 'male' | 'female' }>();
       members.forEach(m => playerInfo.set(m.id, { name: m.name, gender: m.gender }));
 
-      // Also collect player info from matches (includes guests)
       allMatches.forEach(m => {
         [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2].forEach(p => {
           if (!playerInfo.has(p.id)) {
@@ -107,8 +152,14 @@ export default function StatsPage() {
         });
       });
 
-      cachedData.current = { allMatches, playerInfo };
-      computeStats(allMatches, playerInfo, 'all');
+      // Build attendance count map (playerId → session count)
+      const attendanceCounts = new Map<string, number>();
+      allAttendance.forEach(a => {
+        attendanceCounts.set(a.playerId, (attendanceCounts.get(a.playerId) ?? 0) + 1);
+      });
+
+      cachedData.current = { allMatches, playerInfo, attendanceCounts };
+      computeStats(allMatches, playerInfo, attendanceCounts, 'all');
       setLoading(false);
     };
     fetchData();
@@ -117,13 +168,48 @@ export default function StatsPage() {
   const handleSessionChange = (sessionId: string) => {
     setSelectedSessionId(sessionId);
     if (cachedData.current) {
-      computeStats(cachedData.current.allMatches, cachedData.current.playerInfo, sessionId);
+      computeStats(
+        cachedData.current.allMatches,
+        cachedData.current.playerInfo,
+        cachedData.current.attendanceCounts,
+        sessionId
+      );
     }
   };
+
+  // 현재 로그인 유저의 개인 통계
+  const myUsername = appUser?.username;
+  const myStat = myUsername ? stats.find(s => s.name === myUsername) : null;
 
   return (
     <div className="space-y-4 max-w-2xl">
       <h1 className="text-xl font-bold text-slate-800">전적 현황</h1>
+
+      {/* 개인 통계 카드 (로그인한 회원) */}
+      {myStat && (
+        <div className="bg-gradient-to-br from-green-600 to-green-500 text-white rounded-2xl p-5 shadow-md">
+          <p className="text-green-100 text-sm mb-1">내 전적</p>
+          <p className="text-2xl font-bold mb-3">{myStat.name}</p>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="bg-white/20 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold">{myStat.points}</p>
+              <p className="text-xs text-green-100 mt-0.5">승점</p>
+            </div>
+            <div className="bg-white/20 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold">{myStat.wins}</p>
+              <p className="text-xs text-green-100 mt-0.5">승</p>
+            </div>
+            <div className="bg-white/20 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold">{myStat.draws}</p>
+              <p className="text-xs text-green-100 mt-0.5">무</p>
+            </div>
+            <div className="bg-white/20 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold">{myStat.attendanceCount}</p>
+              <p className="text-xs text-green-100 mt-0.5">출석</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Session filter */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -155,31 +241,43 @@ export default function StatsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500">
-                  <th className="px-5 py-2.5 text-left font-medium">순위</th>
-                  <th className="px-5 py-2.5 text-left font-medium">이름</th>
-                  <th className="px-4 py-2.5 text-center font-medium">경기</th>
-                  <th className="px-4 py-2.5 text-center font-medium">승</th>
-                  <th className="px-4 py-2.5 text-center font-medium">패</th>
-                  <th className="px-4 py-2.5 text-center font-medium">승률</th>
+                  <th className="px-4 py-2.5 text-left font-medium">순위</th>
+                  <th className="px-4 py-2.5 text-left font-medium">이름</th>
+                  <th className="px-3 py-2.5 text-center font-medium">승점</th>
+                  <th className="px-3 py-2.5 text-center font-medium">승</th>
+                  <th className="px-3 py-2.5 text-center font-medium">무</th>
+                  <th className="px-3 py-2.5 text-center font-medium">패</th>
+                  {(isAdminUser || selectedSessionId === 'all') && (
+                    <th className="px-3 py-2.5 text-center font-medium">출석</th>
+                  )}
+                  <th className="px-3 py-2.5 text-center font-medium">승률</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {stats.map((s, idx) => {
-                  const total = s.wins + s.losses;
+                  const total = s.wins + s.draws + s.losses;
                   const rate = total > 0 ? Math.round((s.wins / total) * 100) : 0;
+                  const isMe = myUsername === s.name;
                   return (
-                    <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 text-slate-400 text-center">{idx + 1}</td>
-                      <td className="px-5 py-3">
+                    <tr key={s.id} className={`hover:bg-slate-50 transition-colors ${isMe ? 'bg-green-50' : ''}`}>
+                      <td className="px-4 py-3 text-slate-400 text-center">{idx + 1}</td>
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                          <span className="font-medium text-slate-800">{s.name}</span>
+                          <span className={`font-medium ${isMe ? 'text-green-700' : 'text-slate-800'}`}>{s.name}</span>
+                          {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center text-slate-600">{total}</td>
-                      <td className="px-4 py-3 text-center font-medium text-green-600">{s.wins}</td>
-                      <td className="px-4 py-3 text-center text-red-400">{s.losses}</td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-3 text-center">
+                        <span className="font-bold text-blue-600">{s.points}</span>
+                      </td>
+                      <td className="px-3 py-3 text-center font-medium text-green-600">{s.wins}</td>
+                      <td className="px-3 py-3 text-center text-slate-500">{s.draws}</td>
+                      <td className="px-3 py-3 text-center text-red-400">{s.losses}</td>
+                      {(isAdminUser || selectedSessionId === 'all') && (
+                        <td className="px-3 py-3 text-center text-slate-500">{s.attendanceCount}</td>
+                      )}
+                      <td className="px-3 py-3 text-center">
                         <span className={`font-semibold ${rate >= 50 ? 'text-green-600' : 'text-slate-500'}`}>
                           {total > 0 ? `${rate}%` : '-'}
                         </span>
@@ -191,6 +289,10 @@ export default function StatsPage() {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
+        승점: 승리 3점 · 무승부 1점 · 패배 0점
       </div>
     </div>
   );

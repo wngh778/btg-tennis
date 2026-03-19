@@ -298,6 +298,15 @@ export async function getAllMatches(): Promise<Match[]> {
   return (data ?? []).map(rowToMatch);
 }
 
+export async function getAllAttendance(): Promise<AttendanceRecord[]> {
+  const { data, error } = await supabase
+    .from('attendance')
+    .select('*')
+    .eq('attending', true);
+  if (error) throw error;
+  return (data ?? []).map(rowToAttendance);
+}
+
 // --- App Users ---
 function rowToAppUser(row: Record<string, unknown>): AppUser {
   return {

@@ -27,7 +27,7 @@ type SelectedPlayer = {
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { user, isAdminUser } = useAuth();
+  const { user, isAdminUser, loading: authLoading } = useAuth();
 
   const [session, setSession] = useState<Session | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -43,6 +43,12 @@ export default function SessionDetailPage() {
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayer>(null);
   const [saving, setSaving] = useState(false);
+
+  // Generate settings modal
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateCourts, setGenerateCourts] = useState(4);
+  const [generateRounds, setGenerateRounds] = useState(6);
+  const [generateMixedRounds, setGenerateMixedRounds] = useState(2);
 
   // Guest form
   const [showGuestForm, setShowGuestForm] = useState(false);
@@ -69,7 +75,8 @@ export default function SessionDetailPage() {
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  // auth 초기화 완료 후에만 데이터 로드 (새로고침 시 세션 미초기화 상태에서 쿼리 실행 방지)
+  useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
 
   if (loading) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (error) return (
@@ -126,20 +133,32 @@ export default function SessionDetailPage() {
   };
 
   // --- Bracket Generation ---
+  const handleGenerateClick = () => {
+    setGenerateCourts(session.courts);
+    setGenerateRounds(session.rounds);
+    setGenerateMixedRounds(session.mixedRounds);
+    setShowGenerateModal(true);
+  };
+
   const handleGenerate = async () => {
-    if (!confirm(`${attendingPlayers.length}명으로 대진표를 생성하시겠습니까?`)) return;
+    setShowGenerateModal(false);
     const pastMatches = await getAllMatches();
     const generated = generateMatches({
       sessionId: session.id,
       players: attendingPlayers,
-      courts: session.courts,
-      totalRounds: session.rounds,
-      mixedRounds: session.mixedRounds,
+      courts: generateCourts,
+      totalRounds: generateRounds,
+      mixedRounds: session.type === 'weekly' ? generateMixedRounds : 0,
       sessionType: session.type,
       pastMatches,
     });
     await saveMatches(session.id, generated);
-    await updateSession(session.id, { isGenerated: true });
+    await updateSession(session.id, {
+      isGenerated: true,
+      courts: generateCourts,
+      rounds: generateRounds,
+      mixedRounds: session.type === 'weekly' ? generateMixedRounds : 0,
+    });
     load();
     setTab('bracket');
   };
@@ -454,6 +473,98 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Generate Settings Modal */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h2 className="font-bold text-slate-800 text-lg">
+                {session.isGenerated ? '대진표 재생성 설정' : '대진표 생성 설정'}
+              </h2>
+              <p className="text-sm text-slate-500 mt-0.5">참석 인원 {attendingPlayers.length}명 · 남{maleAttending} 여{femaleAttending}</p>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">코트 수</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5, 6].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setGenerateCourts(n)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        generateCourts === n
+                          ? 'bg-green-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">총 라운드 수</label>
+                <div className="flex gap-2">
+                  {[4, 5, 6, 7, 8].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => {
+                        setGenerateRounds(n);
+                        setGenerateMixedRounds(prev => Math.min(prev, n));
+                      }}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        generateRounds === n
+                          ? 'bg-green-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {session.type === 'weekly' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    혼복 라운드 수
+                    <span className="text-xs text-slate-400 font-normal ml-1">(전체 {generateRounds}R 중)</span>
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {Array.from({ length: generateRounds + 1 }, (_, i) => i).map(n => (
+                      <button
+                        key={n}
+                        onClick={() => setGenerateMixedRounds(Math.min(n, generateRounds))}
+                        className={`w-10 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          generateMixedRounds === n
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex gap-3">
+              <button
+                onClick={() => setShowGenerateModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleGenerate}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+              >
+                {session.isGenerated ? '재생성' : '생성'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Bracket Tab */}
       {tab === 'bracket' && (
         <div className="space-y-4">
@@ -497,7 +608,7 @@ export default function SessionDetailPage() {
               )}
               {isAdminUser && !editMode && (
                 <button
-                  onClick={handleGenerate}
+                  onClick={handleGenerateClick}
                   className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
                 >
                   {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
@@ -868,34 +979,36 @@ function MatchCard({
         </div>
 
         {/* Score */}
-        <div className="text-center px-2">
+        <div className="text-center px-1 flex flex-col items-center gap-1">
           {editing ? (
-            <div className="flex flex-col items-center gap-1">
-              <input
-                value={score1}
-                onChange={e => setScore1(e.target.value)}
-                className="w-12 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="0"
-              />
-              <span className="text-slate-400 text-xs">vs</span>
-              <input
-                value={score2}
-                onChange={e => setScore2(e.target.value)}
-                className="w-12 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                placeholder="0"
-              />
-              <div className="flex gap-1 mt-1">
+            <>
+              <div className="flex items-center gap-1">
+                <input
+                  value={score1}
+                  onChange={e => setScore1(e.target.value)}
+                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="0"
+                />
+                <span className="text-slate-400 text-xs font-bold">:</span>
+                <input
+                  value={score2}
+                  onChange={e => setScore2(e.target.value)}
+                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex gap-1">
                 <button onClick={handleSave} className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">저장</button>
                 <button onClick={() => setEditing(false)} className="px-2 py-1 bg-slate-200 text-slate-600 text-xs rounded hover:bg-slate-300">취소</button>
               </div>
-            </div>
+            </>
           ) : (
-            <div>
+            <>
               {match.isCompleted ? (
-                <div>
-                  <div className="text-lg font-bold text-slate-800">{match.score1}</div>
-                  <div className="text-xs text-slate-400">vs</div>
-                  <div className="text-lg font-bold text-slate-800">{match.score2}</div>
+                <div className="flex items-center gap-1">
+                  <span className="text-lg font-bold text-slate-800">{match.score1}</span>
+                  <span className="text-xs text-slate-400 font-bold">:</span>
+                  <span className="text-lg font-bold text-slate-800">{match.score2}</span>
                 </div>
               ) : (
                 <div className="text-slate-300 text-sm">vs</div>
@@ -903,12 +1016,12 @@ function MatchCard({
               {canEditScore && !editMode && (
                 <button
                   onClick={() => setEditing(true)}
-                  className="mt-1 text-xs text-slate-400 hover:text-green-600"
+                  className="text-xs text-slate-400 hover:text-green-600"
                 >
                   {match.isCompleted ? '수정' : '입력'}
                 </button>
               )}
-            </div>
+            </>
           )}
         </div>
 

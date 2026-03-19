@@ -15,8 +15,11 @@ export default function HomePage() {
   useEffect(() => {
     getSessions()
       .then(sessions => {
-        const upcoming = sessions.find(s => s.date >= new Date().toISOString().split('T')[0]);
-        setLatestSession(upcoming || sessions[0] || null);
+        const today = new Date().toISOString().split('T')[0];
+        const upcoming = sessions
+          .filter(s => s.date >= today)
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        setLatestSession(upcoming || sessions.sort((a, b) => b.date.localeCompare(a.date))[0] || null);
       })
       .catch(err => console.error('getSessions error:', err))
       .finally(() => setLoading(false));

@@ -93,19 +93,28 @@ export default function MembersPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
-  const { isAdminUser } = useAuth();
-
-  if (!isAdminUser) {
-    return <div className="text-center py-16 text-slate-500">접근 권한이 없습니다.</div>;
-  }
+  const { isAdminUser, loading: authLoading } = useAuth();
 
   const load = async () => {
-    const data = await getMembers();
-    setMembers(data);
-    setLoading(false);
+    try {
+      const data = await getMembers();
+      setMembers(data);
+    } catch (e) {
+      console.error('members load error:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  // useEffect는 조건부 early return 전에 항상 호출되어야 함 (React hooks 규칙)
+  useEffect(() => {
+    if (!authLoading && isAdminUser) load();
+    else if (!authLoading) setLoading(false);
+  }, [authLoading, isAdminUser]);
+
+  if (!isAdminUser && !authLoading) {
+    return <div className="text-center py-16 text-slate-500">접근 권한이 없습니다.</div>;
+  }
 
   const handleAdd = async (data: Omit<Member, 'id' | 'createdAt'>) => {
     await addMember(data);
