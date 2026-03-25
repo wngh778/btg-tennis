@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 
 const navItems = [
   { path: '/', label: '홈' },
@@ -10,7 +11,8 @@ const navItems = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, isAdminUser, logout } = useAuth();
+  const { user, isAdminUser, isSuperAdmin, logout } = useAuth();
+  const { currentClub, availableClubs, setCurrentClub } = useClub();
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -37,7 +39,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 {item.label}
               </Link>
             ))}
-            {isAdminUser && (
+            {isAdminUser && !isSuperAdmin && (
               <Link
                 to="/members"
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -49,7 +51,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 회원 관리
               </Link>
             )}
-            {isAdminUser && (
+            {isAdminUser && !isSuperAdmin && (
               <Link
                 to="/admin"
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
@@ -61,8 +63,35 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 관리자
               </Link>
             )}
+            {isSuperAdmin && (
+              <Link
+                to="/superadmin"
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === '/superadmin'
+                    ? 'bg-green-900 text-white'
+                    : 'hover:bg-green-600 text-green-100'
+                }`}
+              >
+                슈퍼관리자
+              </Link>
+            )}
             {user ? (
               <>
+                {/* 클럽 선택기 (여러 클럽이 있을 때) */}
+                {availableClubs.length > 1 && currentClub && (
+                  <select
+                    value={currentClub.id}
+                    onChange={e => {
+                      const club = availableClubs.find(c => c.id === e.target.value);
+                      if (club) setCurrentClub(club);
+                    }}
+                    className="ml-1 px-2 py-1 rounded-md text-sm bg-green-800 text-white border border-green-600 focus:outline-none focus:ring-2 focus:ring-green-400"
+                  >
+                    {availableClubs.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
                 <Link
                   to="/account"
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${

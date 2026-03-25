@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSessions, addSession, deleteSession } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import { getNextSunday, getVotingDeadline } from '../utils/matchmaking';
 import type { Session, SessionType } from '../types';
 
@@ -10,10 +11,11 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 }
 
-function NewSessionForm({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
+function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => void; onCancel: () => void; defaultCourts: number }) {
+  const { currentClub } = useClub();
   const [date, setDate] = useState(getNextSunday());
   const [type, setType] = useState<SessionType>('weekly');
-  const [courts, setCourts] = useState(4);
+  const [courts, setCourts] = useState(defaultCourts);
   const [rounds, setRounds] = useState(6);
   const [mixedRounds, setMixedRounds] = useState(2);
   const [deadlineDay, setDeadlineDay] = useState<'friday' | 'saturday'>('saturday');
@@ -23,7 +25,9 @@ function NewSessionForm({ onSave, onCancel }: { onSave: () => void; onCancel: ()
     e.preventDefault();
     setLoading(true);
     const votingDeadline = getVotingDeadline(date, deadlineDay);
+    if (!currentClub) return;
     await addSession({
+      clubId: currentClub.id,
       date,
       type,
       courts,
@@ -118,10 +122,12 @@ export default function SessionsPage() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const { isAdminUser, loading: authLoading } = useAuth();
+  const { currentClub, loadingClubs } = useClub();
 
   const load = async () => {
+    if (!currentClub) { setLoading(false); return; }
     try {
-      const data = await getSessions();
+      const data = await getSessions(currentClub.id);
       setSessions(data);
     } catch (e) {
       console.error('sessions load error:', e);
@@ -130,7 +136,7 @@ export default function SessionsPage() {
     }
   };
 
-  useEffect(() => { if (!authLoading) load(); }, [authLoading]);
+  useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, currentClub]);
 
   const handleDelete = async (id: string, date: string) => {
     if (!confirm(`${formatDate(date)} 경기를 삭제하시겠습니까?`)) return;
@@ -159,7 +165,11 @@ export default function SessionsPage() {
       {showAdd && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <h2 className="font-semibold text-slate-800 mb-4">새 경기 일정 추가</h2>
-          <NewSessionForm onSave={() => { setShowAdd(false); load(); }} onCancel={() => setShowAdd(false)} />
+          <NewSessionForm
+            defaultCourts={currentClub?.defaultCourts ?? 4}
+            onSave={() => { setShowAdd(false); load(); }}
+            onCancel={() => setShowAdd(false)}
+          />
         </div>
       )}
 

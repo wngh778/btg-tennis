@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getSessions } from '../lib/database';
+import { useClub } from '../contexts/ClubContext';
 import type { Session } from '../types';
 
 function formatDate(dateStr: string) {
@@ -9,12 +10,18 @@ function formatDate(dateStr: string) {
 }
 
 export default function HomePage() {
+  const { currentClub, loadingClubs } = useClub();
   const [upcomingSession, setUpcomingSession] = useState<Session | null>(null);
   const [pastSessions, setPastSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getSessions()
+    if (loadingClubs || !currentClub) {
+      if (!loadingClubs) setLoading(false);
+      return;
+    }
+    setLoading(true);
+    getSessions(currentClub.id)
       .then(sessions => {
         const today = new Date().toISOString().split('T')[0];
         const upcoming = sessions
@@ -28,14 +35,13 @@ export default function HomePage() {
       })
       .catch(err => console.error('getSessions error:', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [currentClub, loadingClubs]);
 
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-br from-green-700 to-green-500 text-white rounded-2xl p-8 shadow-md">
-        <h1 className="text-3xl font-bold mb-2">🎾 테니스 대진표</h1>
-        <p className="text-green-100 text-lg">매주 일요일 저녁 6시 30분 ~ 9시 30분</p>
-        <p className="text-green-200 text-sm mt-1">4개 코트 · 복식 경기</p>
+        <h1 className="text-3xl font-bold mb-2">🎾 {currentClub?.name ?? '테니스 대진표'}</h1>
+        <p className="text-green-200 text-sm mt-1">{currentClub ? `${currentClub.defaultCourts}개 코트 · 복식 경기` : ''}</p>
       </div>
 
       {loading ? (

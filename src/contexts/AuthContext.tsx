@@ -6,11 +6,12 @@ import type { AppUser } from '../types';
 interface AuthContextType {
   user: any | null; // supabase session user
   isAdminUser: boolean;
+  isSuperAdmin: boolean;
   appUser: AppUser | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  createUser: (username: string, password: string, role: 'admin' | 'member') => Promise<void>;
+  createUser: (username: string, password: string, role: AppUser['role'], clubIds?: string[], defaultClubId?: string | null) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -19,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,7 +53,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
           ]);
           setAppUser(appUserData);
-          setIsAdminUser(appUserData?.role === 'admin');
+          setIsAdminUser(appUserData?.role === 'admin' || appUserData?.role === 'superadmin');
+          setIsSuperAdmin(appUserData?.role === 'superadmin');
         } catch (e) {
           console.error('getAppUser error:', e);
           setAppUser(null);
@@ -60,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setAppUser(null);
         setIsAdminUser(false);
+        setIsSuperAdmin(false);
       }
 
       // getAppUser 완료 후 loading 해제 (race condition 방지)
@@ -83,16 +87,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const createUser = async (username: string, password: string, role: 'admin' | 'member') => {
+  const createUser = async (username: string, password: string, role: AppUser['role'], clubIds?: string[], defaultClubId?: string | null) => {
     const email = usernameToEmail(username);
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
     if (!data.user) throw new Error('사용자 생성에 실패했습니다.');
-    await createAppUser(data.user.id, { username, role });
+    await createAppUser(data.user.id, { username, role, clubIds, defaultClubId });
   };
 
   return (
-    <AuthContext.Provider value={{ user, appUser, isAdminUser, loading, login, logout, createUser }}>
+    <AuthContext.Provider value={{ user, appUser, isAdminUser, isSuperAdmin, loading, login, logout, createUser }}>
       {children}
     </AuthContext.Provider>
   );

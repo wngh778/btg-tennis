@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import type { Match, Session } from '../types';
 
 function formatDate(dateStr: string) {
@@ -27,6 +28,7 @@ interface CachedData {
 
 export default function StatsPage() {
   const { appUser, isAdminUser } = useAuth();
+  const { currentClub, loadingClubs } = useClub();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
   const [stats, setStats] = useState<PlayerStat[]>([]);
@@ -111,14 +113,15 @@ export default function StatsPage() {
   };
 
   const fetchData = async () => {
+    if (!currentClub) { setLoading(false); return; }
     setLoading(true);
     setLoadError(false);
     try {
       const [allMatches, members, allSessions, allAttendance] = await Promise.all([
-        getAllMatches(),
-        getMembers(),
-        getSessions(),
-        getAllAttendance(),
+        getAllMatches(currentClub.id),
+        getMembers(currentClub.id),
+        getSessions(currentClub.id),
+        getAllAttendance(currentClub.id),
       ]);
 
       setSessions(allSessions);
@@ -146,7 +149,7 @@ export default function StatsPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { if (!loadingClubs) fetchData(); }, [loadingClubs, currentClub]);
 
   const handleSessionChange = (sessionId: string) => {
     setSelectedSessionId(sessionId);

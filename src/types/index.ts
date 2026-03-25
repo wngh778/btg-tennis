@@ -1,7 +1,15 @@
 export type Gender = 'male' | 'female';
 
+export interface Club {
+  id: string;
+  name: string;
+  defaultCourts: number;
+  createdAt: Date;
+}
+
 export interface Member {
   id: string;
+  clubId: string;
   name: string;
   gender: Gender;
   ntrp: number; // 2.0 ~ 5.0, step 0.5
@@ -21,7 +29,8 @@ export type SessionType = 'weekly' | 'quarterly';
 
 export interface Session {
   id: string;
-  date: string; // YYYY-MM-DD (Sunday)
+  clubId: string;
+  date: string; // YYYY-MM-DD
   type: SessionType;
   courts: number; // default 4
   rounds: number; // default 6
@@ -80,9 +89,11 @@ export interface AdminUser {
 }
 
 export interface AppUser {
-  id: string; // Firebase Auth UID
+  id: string;
   username: string;
-  role: 'admin' | 'member';
+  role: 'superadmin' | 'admin' | 'member';
+  clubIds: string[];
+  defaultClubId: string | null;
   createdAt: Date;
 }
 

@@ -6,6 +6,7 @@ import {
   getMatches, saveMatches, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import { generateMatches, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender } from '../types';
 
@@ -28,6 +29,7 @@ type SelectedPlayer = {
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user, appUser, isAdminUser, loading: authLoading } = useAuth();
+  const { currentClub } = useClub();
 
   const [session, setSession] = useState<Session | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -59,9 +61,11 @@ export default function SessionDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, m, g, a, mx] = await Promise.all([
-        getSession(id), getMembers(), getGuests(id), getAttendance(id), getMatches(id),
+      const [s, g, a, mx] = await Promise.all([
+        getSession(id), getGuests(id), getAttendance(id), getMatches(id),
       ]);
+      const clubId = s?.clubId ?? currentClub?.id;
+      const m = clubId ? await getMembers(clubId) : [];
       setSession(s);
       setMembers(m);
       setGuests(g);
@@ -142,7 +146,7 @@ export default function SessionDetailPage() {
 
   const handleGenerate = async () => {
     setShowGenerateModal(false);
-    const pastMatches = await getAllMatches();
+    const pastMatches = await getAllMatches(session.clubId);
     const generated = generateMatches({
       sessionId: session.id,
       players: attendingPlayers,

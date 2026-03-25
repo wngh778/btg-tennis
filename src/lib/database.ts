@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { supabaseAdmin } from './supabaseAdmin';
-import type { Member, Session, AttendanceRecord, Match, Guest, AppUser } from '../types';
+import type { Club, Member, Session, AttendanceRecord, Match, Guest, AppUser } from '../types';
 
 // username → email conversion (same as before)
 export function usernameToEmail(username: string): string {
@@ -11,15 +11,83 @@ export function usernameToEmail(username: string): string {
   return `u${b64}@btg-app.com`;
 }
 
+// --- Clubs ---
+function rowToClub(row: Record<string, unknown>): Club {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    defaultCourts: row.default_courts as number,
+    createdAt: new Date(row.created_at as string),
+  };
+}
+
+export async function getClubs(): Promise<Club[]> {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('*')
+    .order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(rowToClub);
+}
+
+export async function getClub(id: string): Promise<Club | null> {
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data ? rowToClub(data) : null;
+}
+
+export async function getClubsByIds(ids: string[]): Promise<Club[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('clubs')
+    .select('*')
+    .in('id', ids)
+    .order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(rowToClub);
+}
+
+export async function addClub(data: { name: string; defaultCourts: number }): Promise<string> {
+  const { data: inserted, error } = await supabase
+    .from('clubs')
+    .insert({ name: data.name, default_courts: data.defaultCourts })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return inserted.id;
+}
+
+export async function updateClub(id: string, data: Partial<{ name: string; defaultCourts: number }>): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (data.name !== undefined) update.name = data.name;
+  if (data.defaultCourts !== undefined) update.default_courts = data.defaultCourts;
+  const { error } = await supabase.from('clubs').update(update).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteClub(id: string): Promise<void> {
+  const { error } = await supabase.from('clubs').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // --- Members ---
-export async function getMembers(): Promise<Member[]> {
+export async function getMembers(clubId: string): Promise<Member[]> {
   const { data, error } = await supabase
     .from('members')
     .select('*')
+    .eq('club_id', clubId)
     .order('name');
   if (error) throw error;
   return (data ?? []).map(row => ({
     id: row.id,
+    clubId: row.club_id,
     name: row.name,
     gender: row.gender,
     ntrp: row.ntrp,
@@ -31,7 +99,7 @@ export async function getMembers(): Promise<Member[]> {
 export async function addMember(data: Omit<Member, 'id' | 'createdAt'>): Promise<string> {
   const { data: inserted, error } = await supabase
     .from('members')
-    .insert({ name: data.name, gender: data.gender, ntrp: data.ntrp, is_active: data.isActive })
+    .insert({ club_id: data.clubId, name: data.name, gender: data.gender, ntrp: data.ntrp, is_active: data.isActive })
     .select('id')
     .single();
   if (error) throw error;
@@ -57,6 +125,7 @@ export async function deleteMember(id: string): Promise<void> {
 function rowToSession(row: Record<string, unknown>): Session {
   return {
     id: row.id as string,
+    clubId: row.club_id as string,
     date: row.date as string,
     type: row.type as Session['type'],
     courts: row.courts as number,
@@ -69,10 +138,11 @@ function rowToSession(row: Record<string, unknown>): Session {
   };
 }
 
-export async function getSessions(): Promise<Session[]> {
+export async function getSessions(clubId: string): Promise<Session[]> {
   const { data, error } = await supabase
     .from('sessions')
     .select('*')
+    .eq('club_id', clubId)
     .order('date', { ascending: false });
   if (error) throw error;
   return (data ?? []).map(rowToSession);
@@ -96,6 +166,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
   const { data: inserted, error } = await supabase
     .from('sessions')
     .insert({
+      club_id: data.clubId,
       date: data.date,
       type: data.type,
       courts: data.courts,
@@ -103,6 +174,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
       mixed_rounds: data.mixedRounds,
       voting_deadline: data.votingDeadline,
       is_generated: data.isGenerated,
+      is_confirmed: data.isConfirmed,
     })
     .select('id')
     .single();
@@ -293,16 +365,20 @@ export async function updateMatch(
   if (error) throw error;
 }
 
-export async function getAllMatches(): Promise<Match[]> {
-  const { data, error } = await supabase.from('matches').select('*');
+export async function getAllMatches(clubId: string): Promise<Match[]> {
+  const { data, error } = await supabase
+    .from('matches')
+    .select('*, sessions!inner(club_id)')
+    .eq('sessions.club_id', clubId);
   if (error) throw error;
   return (data ?? []).map(rowToMatch);
 }
 
-export async function getAllAttendance(): Promise<AttendanceRecord[]> {
+export async function getAllAttendance(clubId: string): Promise<AttendanceRecord[]> {
   const { data, error } = await supabase
     .from('attendance')
-    .select('*')
+    .select('*, sessions!inner(club_id)')
+    .eq('sessions.club_id', clubId)
     .eq('attending', true);
   if (error) throw error;
   return (data ?? []).map(rowToAttendance);
@@ -313,7 +389,9 @@ function rowToAppUser(row: Record<string, unknown>): AppUser {
   return {
     id: row.id as string,
     username: row.username as string,
-    role: row.role as 'admin' | 'member',
+    role: row.role as AppUser['role'],
+    clubIds: (row.club_ids as string[]) ?? [],
+    defaultClubId: (row.default_club_id as string | null) ?? null,
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -332,10 +410,34 @@ export async function getAppUser(uid: string): Promise<AppUser | null> {
   return rowToAppUser(data);
 }
 
-export async function createAppUser(uid: string, data: { username: string; role: 'admin' | 'member' }): Promise<void> {
+export async function createAppUser(uid: string, data: {
+  username: string;
+  role: AppUser['role'];
+  clubIds?: string[];
+  defaultClubId?: string | null;
+}): Promise<void> {
   const { error } = await supabase
     .from('app_users')
-    .insert({ id: uid, username: data.username, role: data.role });
+    .insert({
+      id: uid,
+      username: data.username,
+      role: data.role,
+      club_ids: data.clubIds ?? [],
+      default_club_id: data.defaultClubId ?? null,
+    });
+  if (error) throw error;
+}
+
+export async function updateAppUser(uid: string, data: Partial<{
+  role: AppUser['role'];
+  clubIds: string[];
+  defaultClubId: string | null;
+}>): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (data.role !== undefined) update.role = data.role;
+  if (data.clubIds !== undefined) update.club_ids = data.clubIds;
+  if (data.defaultClubId !== undefined) update.default_club_id = data.defaultClubId;
+  const { error } = await supabase.from('app_users').update(update).eq('id', uid);
   if (error) throw error;
 }
 
@@ -343,6 +445,16 @@ export async function getAllAppUsers(): Promise<AppUser[]> {
   const { data, error } = await supabase
     .from('app_users')
     .select('*')
+    .order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(rowToAppUser);
+}
+
+export async function getClubUsers(clubId: string): Promise<AppUser[]> {
+  const { data, error } = await supabase
+    .from('app_users')
+    .select('*')
+    .contains('club_ids', [clubId])
     .order('created_at');
   if (error) throw error;
   return (data ?? []).map(rowToAppUser);
@@ -360,7 +472,7 @@ export async function isAdmin(uid: string): Promise<boolean> {
     .eq('id', uid)
     .single();
   if (error) return false;
-  return data?.role === 'admin';
+  return data?.role === 'admin' || data?.role === 'superadmin';
 }
 
 // --- Password Management ---

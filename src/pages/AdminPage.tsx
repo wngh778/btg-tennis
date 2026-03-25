@@ -1,15 +1,23 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getAllAppUsers, deleteAppUser, usernameToEmail, getMembers, resetUserPassword } from '../lib/database';
+import { getClubUsers, deleteAppUser, usernameToEmail, getMembers, resetUserPassword, updateClub } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import { useNavigate } from 'react-router-dom';
 import type { AppUser } from '../types';
 
 export default function AdminPage() {
   const { user, isAdminUser, loading } = useAuth();
+  const { currentClub, loadingClubs } = useClub();
   const navigate = useNavigate();
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+
+  // Club settings
+  const [clubName, setClubName] = useState('');
+  const [clubCourts, setClubCourts] = useState(4);
+  const [clubSaving, setClubSaving] = useState(false);
+  const [clubSaved, setClubSaved] = useState(false);
 
   // New user form
   const [newUsername, setNewUsername] = useState('');
@@ -24,19 +32,40 @@ export default function AdminPage() {
   const [bulkResults, setBulkResults] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!loading && (!user || !isAdminUser)) {
+    if (!loading && !loadingClubs && (!user || !isAdminUser)) {
       navigate('/');
     }
-  }, [loading, user, isAdminUser, navigate]);
+  }, [loading, loadingClubs, user, isAdminUser, navigate]);
+
+  useEffect(() => {
+    if (currentClub) {
+      setClubName(currentClub.name);
+      setClubCourts(currentClub.defaultCourts);
+    }
+  }, [currentClub]);
 
   const load = async () => {
+    if (!currentClub) return;
     setLoadingData(true);
-    const users = await getAllAppUsers();
+    const users = await getClubUsers(currentClub.id);
     setAppUsers(users);
     setLoadingData(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (currentClub) load(); }, [currentClub]);
+
+  const handleSaveClubSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentClub) return;
+    setClubSaving(true);
+    try {
+      await updateClub(currentClub.id, { name: clubName, defaultCourts: clubCourts });
+      setClubSaved(true);
+      setTimeout(() => setClubSaved(false), 2000);
+    } finally {
+      setClubSaving(false);
+    }
+  };
 
   const makeTempClient = () => createClient(
     import.meta.env.VITE_SUPABASE_URL as string,
@@ -46,6 +75,7 @@ export default function AdminPage() {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentClub) return;
     setError(''); setSuccess('');
     setAdding(true);
     try {
@@ -61,7 +91,13 @@ export default function AdminPage() {
 
       const { error: insertError } = await tempClient
         .from('app_users')
-        .insert({ id: data.user.id, username: newUsername, role: newRole });
+        .insert({
+          id: data.user.id,
+          username: newUsername,
+          role: newRole,
+          club_ids: [currentClub.id],
+          default_club_id: currentClub.id,
+        });
       if (insertError) throw insertError;
       setSuccess(`"${newUsername}" (${newRole === 'admin' ? '관리자' : '회원'}) 계정이 추가되었습니다.`);
       setNewUsername(''); setNewPassword(''); setNewRole('member');
@@ -75,12 +111,13 @@ export default function AdminPage() {
   };
 
   const handleBulkCreate = async () => {
+    if (!currentClub) return;
     if (!confirm('활동 중인 회원 전체에 대해\nID: 이름, 비밀번호: 123456\n으로 계정을 생성하시겠습니까?\n(이미 계정이 있는 회원은 건너뜁니다)')) return;
     setBulkCreating(true);
     setBulkResults([]);
 
     try {
-      const members = await getMembers();
+      const members = await getMembers(currentClub.id);
       const existingUsernames = new Set(appUsers.map(u => u.username));
       const activeMembers = members.filter(m => m.isActive);
       const results: string[] = [];
@@ -103,7 +140,13 @@ export default function AdminPage() {
 
           const { error: insertError } = await tempClient
             .from('app_users')
-            .insert({ id: data.user.id, username: member.name, role: 'member' });
+            .insert({
+              id: data.user.id,
+              username: member.name,
+              role: 'member',
+              club_ids: [currentClub.id],
+              default_club_id: currentClub.id,
+            });
           if (insertError) throw insertError;
           results.push(`✅ ${member.name}: 생성 완료`);
         } catch (e: unknown) {
@@ -130,17 +173,56 @@ export default function AdminPage() {
   };
 
   const handleDeleteAppUser = async (u: AppUser) => {
-    if (!confirm(`"${u.username}" 계정을 삭제하시겠습니까?\n(Supabase Auth 계정은 서비스 역할 키가 필요하여 앱 사용자 기록만 삭제됩니다)`)) return;
+    if (!confirm(`"${u.username}" 계정을 삭제하시겠습니까?`)) return;
     await deleteAppUser(u.id);
     load();
   };
 
-  if (loading || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
+  if (loading || loadingClubs || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (!isAdminUser) return null;
+  if (!currentClub) return <div className="text-center py-16 text-slate-400">클럽이 없습니다. 슈퍼관리자에서 클럽을 추가해주세요.</div>;
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h1 className="text-xl font-bold text-slate-800">관리자 설정</h1>
+      <h1 className="text-xl font-bold text-slate-800">관리자 설정 — {currentClub.name}</h1>
+
+      {/* 클럽 설정 */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h2 className="font-semibold text-slate-800 mb-4">클럽 설정</h2>
+        <form onSubmit={handleSaveClubSettings} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">클럽 이름</label>
+              <input
+                value={clubName}
+                onChange={e => setClubName(e.target.value)}
+                required
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">기본 코트 수</label>
+              <select
+                value={clubCourts}
+                onChange={e => setClubCourts(parseInt(e.target.value))}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}개</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end items-center gap-3">
+            {clubSaved && <span className="text-green-600 text-sm">저장됨</span>}
+            <button
+              type="submit"
+              disabled={clubSaving}
+              className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              {clubSaving ? '저장 중...' : '설정 저장'}
+            </button>
+          </div>
+        </form>
+      </div>
 
       {/* App Users */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
@@ -164,18 +246,8 @@ export default function AdminPage() {
                   }`}>
                     {u.role === 'admin' ? '관리자' : '회원'}
                   </span>
-                  <button
-                    onClick={() => handleResetPassword(u)}
-                    className="text-amber-500 hover:text-amber-700 text-sm"
-                  >
-                    비번초기화
-                  </button>
-                  <button
-                    onClick={() => handleDeleteAppUser(u)}
-                    className="text-red-400 hover:text-red-600 text-sm"
-                  >
-                    삭제
-                  </button>
+                  <button onClick={() => handleResetPassword(u)} className="text-amber-500 hover:text-amber-700 text-sm">비번초기화</button>
+                  <button onClick={() => handleDeleteAppUser(u)} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
                 </div>
               </div>
             ))
@@ -187,7 +259,9 @@ export default function AdminPage() {
       {/* Bulk Create */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
         <h2 className="font-semibold text-slate-800 mb-2">회원 일괄 계정 생성</h2>
-        <p className="text-sm text-slate-500 mb-4">회원 목록에 있는 활동 회원 전체의 계정을 자동 생성합니다.<br />ID: 이름 · 비밀번호: 123456</p>
+        <p className="text-sm text-slate-500 mb-4">
+          이 클럽의 활동 회원 전체에 대해 계정을 자동 생성합니다.<br />ID: 이름 · 비밀번호: 123456
+        </p>
         <button
           onClick={handleBulkCreate}
           disabled={bulkCreating}
@@ -197,9 +271,7 @@ export default function AdminPage() {
         </button>
         {bulkResults.length > 0 && (
           <div className="mt-4 bg-slate-50 rounded-xl p-4 space-y-1 max-h-48 overflow-y-auto">
-            {bulkResults.map((r, i) => (
-              <p key={i} className="text-xs text-slate-700">{r}</p>
-            ))}
+            {bulkResults.map((r, i) => <p key={i} className="text-xs text-slate-700">{r}</p>)}
           </div>
         )}
       </div>
@@ -256,15 +328,6 @@ export default function AdminPage() {
             </button>
           </div>
         </form>
-      </div>
-
-      {/* Info */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-        <p className="font-medium mb-1">안내</p>
-        <ul className="space-y-1 text-blue-600 list-disc list-inside">
-          <li>사용자 추가 후에도 관리자 세션이 유지됩니다.</li>
-          <li>사용자 삭제 시 앱 사용자 기록만 삭제됩니다 (Auth 계정 삭제는 서비스 역할 키 필요)</li>
-        </ul>
       </div>
     </div>
   );

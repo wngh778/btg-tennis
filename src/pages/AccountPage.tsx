@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { updateAppUser } from '../lib/database';
 
 export default function AccountPage() {
   const { user, appUser, loading } = useAuth();
+  const { currentClub, availableClubs, setCurrentClub } = useClub();
   const navigate = useNavigate();
 
   const [newPassword, setNewPassword] = useState('');
@@ -59,12 +62,45 @@ export default function AccountPage() {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">권한</span>
-            <span className={`font-medium ${appUser.role === 'admin' ? 'text-purple-600' : 'text-green-600'}`}>
-              {appUser.role === 'admin' ? '관리자' : '회원'}
+            <span className={`font-medium ${appUser.role === 'superadmin' ? 'text-red-600' : appUser.role === 'admin' ? 'text-purple-600' : 'text-green-600'}`}>
+              {appUser.role === 'superadmin' ? '슈퍼관리자' : appUser.role === 'admin' ? '관리자' : '회원'}
             </span>
           </div>
+          {availableClubs.length > 0 && (
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500">소속 클럽</span>
+              <span className="font-medium text-slate-800">{availableClubs.map(c => c.name).join(', ')}</span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* 기본 클럽 설정 (클럽이 여러 개일 때) */}
+      {availableClubs.length > 1 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h2 className="font-semibold text-slate-700 mb-3">기본 클럽 설정</h2>
+          <p className="text-xs text-slate-500 mb-3">로그인 시 처음 보여줄 클럽을 선택합니다.</p>
+          <div className="space-y-2">
+            {availableClubs.map(club => (
+              <label key={club.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
+                <input
+                  type="radio"
+                  name="defaultClub"
+                  checked={currentClub?.id === club.id}
+                  onChange={async () => {
+                    setCurrentClub(club);
+                    if (appUser) await updateAppUser(appUser.id, { defaultClubId: club.id });
+                  }}
+                  className="text-green-600"
+                />
+                <span className="text-sm font-medium text-slate-800">{club.name}</span>
+                <span className="text-xs text-slate-400">{club.defaultCourts}개 코트</span>
+                {currentClub?.id === club.id && <span className="ml-auto text-xs text-green-600 font-medium">현재 선택</span>}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 비밀번호 변경 */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">

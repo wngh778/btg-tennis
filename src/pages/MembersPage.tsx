@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getMembers, addMember, updateMember, deleteMember } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
+import { useClub } from '../contexts/ClubContext';
 import { NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Member, Gender } from '../types';
 
@@ -12,7 +13,7 @@ function MemberForm({
   onCancel,
 }: {
   initial?: Partial<Member>;
-  onSave: (data: Omit<Member, 'id' | 'createdAt'>) => void;
+  onSave: (data: Omit<Member, 'id' | 'createdAt' | 'clubId'>) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initial?.name || '');
@@ -94,10 +95,12 @@ export default function MembersPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const { isAdminUser, loading: authLoading } = useAuth();
+  const { currentClub, loadingClubs } = useClub();
 
   const load = async () => {
+    if (!currentClub) { setLoading(false); return; }
     try {
-      const data = await getMembers();
+      const data = await getMembers(currentClub.id);
       setMembers(data);
     } catch (e) {
       console.error('members load error:', e);
@@ -106,23 +109,22 @@ export default function MembersPage() {
     }
   };
 
-  // useEffect는 조건부 early return 전에 항상 호출되어야 함 (React hooks 규칙)
   useEffect(() => {
-    if (!authLoading && isAdminUser) load();
-    else if (!authLoading) setLoading(false);
-  }, [authLoading, isAdminUser]);
+    if (!authLoading && !loadingClubs && isAdminUser) load();
+    else if (!authLoading && !loadingClubs) setLoading(false);
+  }, [authLoading, loadingClubs, isAdminUser, currentClub]);
 
   if (!isAdminUser && !authLoading) {
     return <div className="text-center py-16 text-slate-500">접근 권한이 없습니다.</div>;
   }
 
-  const handleAdd = async (data: Omit<Member, 'id' | 'createdAt'>) => {
-    await addMember(data);
+  const handleAdd = async (data: Omit<Member, 'id' | 'createdAt' | 'clubId'>) => {
+    await addMember({ ...data, clubId: currentClub!.id });
     setShowAdd(false);
     load();
   };
 
-  const handleUpdate = async (id: string, data: Omit<Member, 'id' | 'createdAt'>) => {
+  const handleUpdate = async (id: string, data: Omit<Member, 'id' | 'createdAt' | 'clubId'>) => {
     await updateMember(id, data);
     setEditId(null);
     load();
