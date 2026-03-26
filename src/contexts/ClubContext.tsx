@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
-import { getClubsByIds } from '../lib/database';
+import { getClubs, getClubsByIds } from '../lib/database';
 import type { Club } from '../types';
 
 interface ClubContextType {
@@ -13,7 +13,7 @@ interface ClubContextType {
 const ClubContext = createContext<ClubContextType | null>(null);
 
 export function ClubProvider({ children }: { children: ReactNode }) {
-  const { appUser, loading: authLoading } = useAuth();
+  const { appUser, isSuperAdmin, loading: authLoading } = useAuth();
   const [currentClub, setCurrentClubState] = useState<Club | null>(null);
   const [availableClubs, setAvailableClubs] = useState<Club[]>([]);
   const [loadingClubs, setLoadingClubs] = useState(true);
@@ -21,7 +21,7 @@ export function ClubProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (authLoading) return;
 
-    if (!appUser || appUser.clubIds.length === 0) {
+    if (!appUser || (!isSuperAdmin && appUser.clubIds.length === 0)) {
       setAvailableClubs([]);
       setCurrentClubState(null);
       setLoadingClubs(false);
@@ -29,7 +29,7 @@ export function ClubProvider({ children }: { children: ReactNode }) {
     }
 
     setLoadingClubs(true);
-    getClubsByIds(appUser.clubIds)
+    (isSuperAdmin ? getClubs() : getClubsByIds(appUser.clubIds))
       .then(clubs => {
         setAvailableClubs(clubs);
 
@@ -45,7 +45,7 @@ export function ClubProvider({ children }: { children: ReactNode }) {
         setCurrentClubState(null);
       })
       .finally(() => setLoadingClubs(false));
-  }, [appUser, authLoading]);
+  }, [appUser, isSuperAdmin, authLoading]);
 
   const setCurrentClub = (club: Club) => {
     setCurrentClubState(club);

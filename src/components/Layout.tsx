@@ -20,7 +20,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-green-700 text-white shadow-md">
+      <header className="text-white shadow-md" style={{ backgroundColor: currentClub?.color ?? '#15803d' }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
             🎾 테니스 대진표

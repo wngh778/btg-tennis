@@ -4,6 +4,7 @@ export interface Club {
   id: string;
   name: string;
   defaultCourts: number;
+  color: string;
   createdAt: Date;
 }
 

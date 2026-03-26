@@ -19,6 +19,7 @@ export default function SuperAdminPage() {
   // Club form
   const [newClubName, setNewClubName] = useState('');
   const [newClubCourts, setNewClubCourts] = useState(4);
+  const [newClubColor, setNewClubColor] = useState('#15803d');
   const [editClub, setEditClub] = useState<Club | null>(null);
   const [clubSaving, setClubSaving] = useState(false);
 
@@ -53,9 +54,10 @@ export default function SuperAdminPage() {
     e.preventDefault();
     setClubSaving(true);
     try {
-      await addClub({ name: newClubName.trim(), defaultCourts: newClubCourts });
+      await addClub({ name: newClubName.trim(), defaultCourts: newClubCourts, color: newClubColor });
       setNewClubName('');
       setNewClubCourts(4);
+      setNewClubColor('#15803d');
       load();
     } finally {
       setClubSaving(false);
@@ -67,7 +69,7 @@ export default function SuperAdminPage() {
     if (!editClub) return;
     setClubSaving(true);
     try {
-      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts });
+      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts, color: editClub.color });
       setEditClub(null);
       load();
     } finally {
@@ -170,7 +172,7 @@ export default function SuperAdminPage() {
             clubs.map(club => (
               <div key={club.id} className="px-5 py-3">
                 {editClub?.id === club.id ? (
-                  <form onSubmit={handleUpdateClub} className="flex items-center gap-2">
+                  <form onSubmit={handleUpdateClub} className="flex items-center gap-2 flex-wrap">
                     <input
                       value={editClub.name}
                       onChange={e => setEditClub({ ...editClub, name: e.target.value })}
@@ -184,14 +186,24 @@ export default function SuperAdminPage() {
                     >
                       {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}코트</option>)}
                     </select>
+                    <input
+                      type="color"
+                      value={editClub.color ?? '#15803d'}
+                      onChange={e => setEditClub({ ...editClub, color: e.target.value })}
+                      className="w-8 h-8 rounded cursor-pointer border border-slate-300"
+                      title="클럽 색상"
+                    />
                     <button type="submit" disabled={clubSaving} className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">저장</button>
                     <button type="button" onClick={() => setEditClub(null)} className="px-3 py-1.5 text-slate-500 text-sm hover:text-slate-700">취소</button>
                   </form>
                 ) : (
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-slate-800">{club.name}</p>
-                      <p className="text-xs text-slate-400">기본 코트 {club.defaultCourts}개</p>
+                    <div className="flex items-center gap-3">
+                      <div className="w-4 h-4 rounded-full border border-slate-200" style={{ backgroundColor: club.color ?? '#15803d' }} />
+                      <div>
+                        <p className="font-medium text-slate-800">{club.name}</p>
+                        <p className="text-xs text-slate-400">기본 코트 {club.defaultCourts}개</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => setEditClub(club)} className="text-blue-500 hover:text-blue-700 text-sm">수정</button>
@@ -205,7 +217,7 @@ export default function SuperAdminPage() {
         </div>
         {/* 클럽 추가 폼 */}
         <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
-          <form onSubmit={handleAddClub} className="flex items-center gap-2">
+          <form onSubmit={handleAddClub} className="flex items-center gap-2 flex-wrap">
             <input
               value={newClubName}
               onChange={e => setNewClubName(e.target.value)}
@@ -220,6 +232,13 @@ export default function SuperAdminPage() {
             >
               {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}코트</option>)}
             </select>
+            <input
+              type="color"
+              value={newClubColor}
+              onChange={e => setNewClubColor(e.target.value)}
+              className="w-8 h-8 rounded cursor-pointer border border-slate-300"
+              title="클럽 색상"
+            />
             <button type="submit" disabled={clubSaving} className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap">
               {clubSaving ? '추가 중...' : '+ 클럽 추가'}
             </button>

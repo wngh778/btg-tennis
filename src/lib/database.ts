@@ -17,6 +17,7 @@ function rowToClub(row: Record<string, unknown>): Club {
     id: row.id as string,
     name: row.name as string,
     defaultCourts: row.default_courts as number,
+    color: (row.color as string) ?? '#15803d',
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -54,20 +55,21 @@ export async function getClubsByIds(ids: string[]): Promise<Club[]> {
   return (data ?? []).map(rowToClub);
 }
 
-export async function addClub(data: { name: string; defaultCourts: number }): Promise<string> {
+export async function addClub(data: { name: string; defaultCourts: number; color?: string }): Promise<string> {
   const { data: inserted, error } = await supabase
     .from('clubs')
-    .insert({ name: data.name, default_courts: data.defaultCourts })
+    .insert({ name: data.name, default_courts: data.defaultCourts, color: data.color ?? '#15803d' })
     .select('id')
     .single();
   if (error) throw error;
   return inserted.id;
 }
 
-export async function updateClub(id: string, data: Partial<{ name: string; defaultCourts: number }>): Promise<void> {
+export async function updateClub(id: string, data: Partial<{ name: string; defaultCourts: number; color: string }>): Promise<void> {
   const update: Record<string, unknown> = {};
   if (data.name !== undefined) update.name = data.name;
   if (data.defaultCourts !== undefined) update.default_courts = data.defaultCourts;
+  if (data.color !== undefined) update.color = data.color;
   const { error } = await supabase.from('clubs').update(update).eq('id', id);
   if (error) throw error;
 }
