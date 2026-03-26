@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   getClubs, addClub, updateClub, deleteClub,
   getAllAppUsers, updateAppUser, deleteAppUser, resetUserPassword, usernameToEmail,
+  getMembers,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -32,6 +33,11 @@ export default function SuperAdminPage() {
   const [userSaving, setUserSaving] = useState(false);
   const [userError, setUserError] = useState('');
   const [userSuccess, setUserSuccess] = useState('');
+
+  // Bulk create
+  const [bulkClubId, setBulkClubId] = useState('');
+  const [bulkCreating, setBulkCreating] = useState(false);
+  const [bulkResults, setBulkResults] = useState<string[]>([]);
 
   useEffect(() => {
     if (!loading && (!user || !isSuperAdmin)) {
@@ -153,6 +159,51 @@ export default function SuperAdminPage() {
     load();
   };
 
+  const handleBulkCreate = async () => {
+    if (!bulkClubId) { alert('클럽을 선택해주세요.'); return; }
+    const club = clubs.find(c => c.id === bulkClubId);
+    if (!club) return;
+    if (!confirm(`"${club.name}" 클럽의 활동 회원 전체에 대해\nID: 이름, 비밀번호: 123456\n으로 계정을 생성하시겠습니까?\n(이미 계정이 있는 회원은 건너뜁니다)`)) return;
+    setBulkCreating(true);
+    setBulkResults([]);
+    try {
+      const members = await getMembers(bulkClubId);
+      const existingUsernames = new Set(appUsers.map(u => u.username));
+      const activeMembers = members.filter(m => m.isActive);
+      const results: string[] = [];
+      for (const member of activeMembers) {
+        if (existingUsernames.has(member.name)) {
+          results.push(`✓ ${member.name}: 이미 계정 있음`);
+          continue;
+        }
+        try {
+          const email = usernameToEmail(member.name);
+          const tempClient = makeTempClient();
+          const { data, error: signUpError } = await tempClient.auth.signUp({
+            email, password: '123456', options: { emailRedirectTo: undefined },
+          });
+          if (signUpError) throw signUpError;
+          if (!data.user) throw new Error('user null');
+          const { error: insertError } = await tempClient.from('app_users').insert({
+            id: data.user.id,
+            username: member.name,
+            role: 'member',
+            club_ids: [bulkClubId],
+            default_club_id: bulkClubId,
+          });
+          if (insertError) throw insertError;
+          results.push(`✅ ${member.name}: 생성 완료`);
+        } catch (e: unknown) {
+          results.push(`❌ ${member.name}: 실패 - ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      setBulkResults(results);
+      load();
+    } finally {
+      setBulkCreating(false);
+    }
+  };
+
   if (loading || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (!isSuperAdmin) return null;
 
@@ -270,6 +321,34 @@ export default function SuperAdminPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* --- 회원 일괄 계정 생성 --- */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h2 className="font-semibold text-slate-800 mb-2">회원 일괄 계정 생성</h2>
+        <p className="text-sm text-slate-500 mb-4">클럽의 활동 회원 전체에 대해 계정을 자동 생성합니다.<br />ID: 이름 · 비밀번호: 123456</p>
+        <div className="flex items-center gap-3 mb-3">
+          <select
+            value={bulkClubId}
+            onChange={e => setBulkClubId(e.target.value)}
+            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+          >
+            <option value="">클럽 선택</option>
+            {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button
+            onClick={handleBulkCreate}
+            disabled={bulkCreating || !bulkClubId}
+            className="px-4 py-2 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-600 disabled:opacity-50 transition-colors font-medium whitespace-nowrap"
+          >
+            {bulkCreating ? '생성 중...' : '일괄 계정 생성'}
+          </button>
+        </div>
+        {bulkResults.length > 0 && (
+          <div className="bg-slate-50 rounded-xl p-4 space-y-1 max-h-48 overflow-y-auto">
+            {bulkResults.map((r, i) => <p key={i} className="text-xs text-slate-700">{r}</p>)}
+          </div>
+        )}
       </div>
 
       {/* --- 사용자 추가 폼 --- */}
