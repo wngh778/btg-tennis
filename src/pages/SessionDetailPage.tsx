@@ -28,7 +28,7 @@ type SelectedPlayer = {
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { user, appUser, isAdminUser, loading: authLoading } = useAuth();
+  const { user, appUser, isAdminUser, isSuperAdmin, loading: authLoading } = useAuth();
   const { currentClub } = useClub();
 
   const [session, setSession] = useState<Session | null>(null);
@@ -216,6 +216,57 @@ export default function SessionDetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleMondayGenerate = async () => {
+    const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
+    if (malePlayers.length !== 6) {
+      alert(`참석 남성이 ${malePlayers.length}명입니다. 이 기능은 정확히 6명일 때 사용할 수 있습니다.`);
+      return;
+    }
+    const yeom = malePlayers.find(p => p.name === '염주호');
+    if (!yeom) {
+      alert('참석 목록에 염주호가 없습니다.');
+      return;
+    }
+    if (!confirm('염주호 우선 편성으로 대진표를 생성하시겠습니까?\n기존 대진표가 있으면 덮어씁니다.')) return;
+
+    // 6명 NTRP 순 정렬 후 균형 페어링: (0+5), (1+4), (2+3)
+    const sorted = [...malePlayers].sort((a, b) => b.ntrp - a.ntrp);
+    const yeomIdx = sorted.findIndex(p => p.name === '염주호');
+    const partnerIdx = 5 - yeomIdx;
+    const Y = sorted[yeomIdx];
+    const P1 = sorted[partnerIdx];
+    const others = sorted.filter((_, i) => i !== yeomIdx && i !== partnerIdx);
+    // others: 4명, NTRP 순 → PairB=(강+약), PairC=(중+중)
+    const [B1, B2, B3, B4] = others; // sorted desc
+    const pairB: [Player, Player] = [B1, B4];
+    const pairC: [Player, Player] = [B2, B3];
+
+    const mk = (round: number, t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player): Omit<Match, 'id'> => ({
+      sessionId: session!.id,
+      round,
+      court: 1,
+      matchType: 'male' as const,
+      team1: { player1: t1p1, player2: t1p2 },
+      team2: { player1: t2p1, player2: t2p2 },
+      score1: undefined,
+      score2: undefined,
+      isCompleted: false,
+    });
+
+    const generated: Omit<Match, 'id'>[] = [
+      mk(1, Y, pairB[0], P1, pairB[1]),   // 염주호 1라운드
+      mk(2, Y, pairC[0], P1, pairC[1]),   // 염주호 2라운드
+      mk(3, pairB[0], pairC[0], pairB[1], pairC[1]), // 염주호 휴식
+      mk(4, Y, pairB[1], P1, pairB[0]),   // 염주호 4라운드 (PairB 파트너 교환)
+      mk(5, Y, pairC[1], P1, pairC[0]),   // 염주호 5라운드 (PairC 파트너 교환)
+    ];
+
+    await saveMatches(session!.id, generated);
+    await updateSession(session!.id, { isGenerated: true, courts: 1, rounds: 5, mixedRounds: 0 });
+    load();
+    setTab('bracket');
   };
 
   const handleDragDrop = (targetMatchId: string) => {
@@ -697,6 +748,14 @@ export default function SessionDetailPage() {
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
                   확정
+                </button>
+              )}
+              {isSuperAdmin && !editMode && (
+                <button
+                  onClick={handleMondayGenerate}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+                >
+                  월요일 편성
                 </button>
               )}
               {isAdminUser && !editMode && (
