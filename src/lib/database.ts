@@ -355,11 +355,12 @@ export async function updateMatchScore(id: string, score1: string, score2: strin
 
 export async function updateMatch(
   id: string,
-  data: Partial<Pick<Match, 'team1' | 'team2' | 'court' | 'matchType' | 'score1' | 'score2' | 'isCompleted'>>
+  data: Partial<Pick<Match, 'team1' | 'team2' | 'round' | 'court' | 'matchType' | 'score1' | 'score2' | 'isCompleted'>>
 ): Promise<void> {
   const update: Record<string, unknown> = {};
   if (data.team1 !== undefined) update.team1 = data.team1;
   if (data.team2 !== undefined) update.team2 = data.team2;
+  if (data.round !== undefined) update.round = data.round;
   if (data.court !== undefined) update.court = data.court;
   if (data.matchType !== undefined) update.match_type = data.matchType;
   if (data.score1 !== undefined) update.score1 = data.score1;

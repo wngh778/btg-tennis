@@ -45,6 +45,8 @@ export default function SessionDetailPage() {
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayer>(null);
   const [saving, setSaving] = useState(false);
+  const [dragMatchId, setDragMatchId] = useState<string | null>(null);
+  const [dragOverMatchId, setDragOverMatchId] = useState<string | null>(null);
 
   // Generate settings modal
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -195,15 +197,16 @@ export default function SessionDetailPage() {
   const handleEditSave = async () => {
     setSaving(true);
     try {
-      // Find modified matches and save them
       for (const pm of pendingMatches) {
         const original = matches.find(m => m.id === pm.id);
         if (!original) continue;
         const changed =
           JSON.stringify(original.team1) !== JSON.stringify(pm.team1) ||
-          JSON.stringify(original.team2) !== JSON.stringify(pm.team2);
+          JSON.stringify(original.team2) !== JSON.stringify(pm.team2) ||
+          original.round !== pm.round ||
+          original.court !== pm.court;
         if (changed) {
-          await updateMatch(pm.id, { team1: pm.team1, team2: pm.team2 });
+          await updateMatch(pm.id, { team1: pm.team1, team2: pm.team2, round: pm.round, court: pm.court });
         }
       }
       setEditMode(false);
@@ -213,6 +216,22 @@ export default function SessionDetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDragDrop = (targetMatchId: string) => {
+    if (!dragMatchId || dragMatchId === targetMatchId) {
+      setDragMatchId(null);
+      setDragOverMatchId(null);
+      return;
+    }
+    const newPending = pendingMatches.map(m => ({ ...m }));
+    const matchA = newPending.find(m => m.id === dragMatchId)!;
+    const matchB = newPending.find(m => m.id === targetMatchId)!;
+    [matchA.round, matchB.round] = [matchB.round, matchA.round];
+    [matchA.court, matchB.court] = [matchB.court, matchA.court];
+    setPendingMatches(newPending);
+    setDragMatchId(null);
+    setDragOverMatchId(null);
   };
 
   const handlePlayerClick = (
@@ -252,8 +271,6 @@ export default function SessionDetailPage() {
     }
   };
 
-  // Group matches by round
-  const rounds = Array.from(new Set(matches.map(m => m.round))).sort((a, b) => a - b);
 
   const activeMembers = members.filter(m => m.isActive);
   const maleAttending = attendingPlayers.filter(p => p.gender === 'male').length;
@@ -700,7 +717,7 @@ export default function SessionDetailPage() {
           )}
           {editMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
-              선수 이름을 클릭하여 위치를 바꿀 수 있습니다. 첫 번째 선수 선택 후 두 번째 선수를 클릭하면 위치가 교환됩니다.
+              선수 이름 클릭 → 위치 교환 &nbsp;|&nbsp; ↑↓ 버튼 → 경기 순서 이동
             </div>
           )}
 
@@ -709,8 +726,10 @@ export default function SessionDetailPage() {
               <p className="text-slate-400 text-lg mb-2">아직 대진표가 없습니다.</p>
               {isAdminUser && <p className="text-slate-400 text-sm">참석 투표 완료 후 대진표를 생성하세요.</p>}
             </div>
-          ) : (
-            rounds.map(round => (
+          ) : (() => {
+            const displaySource = editMode ? pendingMatches : matches;
+            const displayRounds = Array.from(new Set(displaySource.map(m => m.round))).sort((a, b) => a - b);
+            return displayRounds.map(round => (
               <RoundCard
                 key={round}
                 round={round}
@@ -719,13 +738,18 @@ export default function SessionDetailPage() {
                 canEditScore={!!user && !session.isConfirmed}
                 onScoreUpdate={handleScoreUpdate}
                 editMode={editMode}
-                pendingMatches={pendingMatches.filter(m => m.round === round)}
+                pendingMatches={displaySource.filter(m => m.round === round)}
                 selectedPlayer={selectedPlayer}
                 onPlayerClick={handlePlayerClick}
                 showNtrp={isAdminUser}
+                dragMatchId={dragMatchId}
+                dragOverMatchId={dragOverMatchId}
+                onDragStart={setDragMatchId}
+                onDragOver={setDragOverMatchId}
+                onDrop={handleDragDrop}
               />
-            ))
-          )}
+            ));
+          })()}
         </div>
       )}
 
@@ -943,6 +967,7 @@ function SessionResultTab({ attendingPlayers, matches }: { attendingPlayers: Pla
 function RoundCard({
   round, matches, attendingPlayers, canEditScore, onScoreUpdate,
   editMode, pendingMatches, selectedPlayer, onPlayerClick, showNtrp,
+  dragMatchId, dragOverMatchId, onDragStart, onDragOver, onDrop,
 }: {
   round: number;
   matches: Match[];
@@ -954,6 +979,11 @@ function RoundCard({
   selectedPlayer: SelectedPlayer;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
   showNtrp: boolean;
+  dragMatchId: string | null;
+  dragOverMatchId: string | null;
+  onDragStart: (id: string) => void;
+  onDragOver: (id: string) => void;
+  onDrop: (id: string) => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -977,6 +1007,10 @@ function RoundCard({
             selectedPlayer={selectedPlayer}
             onPlayerClick={onPlayerClick}
             showNtrp={showNtrp}
+            onDragStart={onDragStart}
+            onDragOver={() => onDragOver(m.id)}
+            onDrop={onDrop}
+            isDragOver={dragOverMatchId === m.id && dragMatchId !== m.id}
           />
         ))}
       </div>
@@ -997,6 +1031,7 @@ function RoundCard({
 
 function MatchCard({
   match, canEditScore, onScoreUpdate, editMode, selectedPlayer, onPlayerClick, showNtrp,
+  onDragStart, onDragOver, onDrop, isDragOver,
 }: {
   match: Match;
   canEditScore: boolean;
@@ -1005,6 +1040,10 @@ function MatchCard({
   selectedPlayer: SelectedPlayer;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
   showNtrp: boolean;
+  onDragStart?: (matchId: string) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (matchId: string) => void;
+  isDragOver?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [score1, setScore1] = useState(match.score1 || '');
@@ -1019,10 +1058,17 @@ function MatchCard({
   const t2Ntrp = ((match.team2.player1.ntrp + match.team2.player2.ntrp) / 2).toFixed(1);
 
   return (
-    <div className={`p-4 border-l-4 ${matchTypeBg[match.matchType]}`}>
+    <div
+      className={`p-4 border-l-4 ${matchTypeBg[match.matchType]} ${isDragOver ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''} ${editMode ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      draggable={editMode}
+      onDragStart={editMode ? () => onDragStart?.(match.id) : undefined}
+      onDragOver={editMode ? (e) => { e.preventDefault(); onDragOver?.(e); } : undefined}
+      onDrop={editMode ? () => onDrop?.(match.id) : undefined}
+    >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-600 text-sm">{match.court}번 코트</span>
+          {editMode && <span className="text-slate-300 text-sm select-none">⠿</span>}
+          <span className="font-semibold text-slate-600 text-sm">{match.round}R {match.court}코트</span>
           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${matchTypeBadge[match.matchType]}`}>
             {matchTypeLabel[match.matchType]}
           </span>
