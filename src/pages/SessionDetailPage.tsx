@@ -54,6 +54,10 @@ export default function SessionDetailPage() {
   const [generateRounds, setGenerateRounds] = useState(6);
   const [generateMixedRounds, setGenerateMixedRounds] = useState(2);
 
+  // Monday schedule modal
+  const [showMondayModal, setShowMondayModal] = useState(false);
+  const [mondayFirstPlayer, setMondayFirstPlayer] = useState('');
+
   // Guest form
   const [showGuestForm, setShowGuestForm] = useState(false);
   const [guestName, setGuestName] = useState('');
@@ -218,28 +222,28 @@ export default function SessionDetailPage() {
     }
   };
 
-  const handleMondayGenerate = async () => {
+  const handleMondayClick = () => {
     const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
     if (malePlayers.length !== 6) {
       alert(`참석 남성이 ${malePlayers.length}명입니다. 이 기능은 정확히 6명일 때 사용할 수 있습니다.`);
       return;
     }
-    const yeom = malePlayers.find(p => p.name === '염주호');
-    if (!yeom) {
-      alert('참석 목록에 염주호가 없습니다.');
-      return;
-    }
-    if (!confirm('염주호 우선 편성으로 대진표를 생성하시겠습니까?\n기존 대진표가 있으면 덮어씁니다.')) return;
+    setMondayFirstPlayer(malePlayers.find(p => p.name === '염주호')?.name ?? malePlayers[0].name);
+    setShowMondayModal(true);
+  };
 
-    // 6명 NTRP 순 정렬 후 균형 페어링: (0+5), (1+4), (2+3)
+  const handleMondayGenerate = async () => {
+    const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
+    const Y = malePlayers.find(p => p.name === mondayFirstPlayer);
+    if (!Y) return;
+    setShowMondayModal(false);
+
     const sorted = [...malePlayers].sort((a, b) => b.ntrp - a.ntrp);
-    const yeomIdx = sorted.findIndex(p => p.name === '염주호');
-    const partnerIdx = 5 - yeomIdx;
-    const Y = sorted[yeomIdx];
+    const firstIdx = sorted.findIndex(p => p.name === mondayFirstPlayer);
+    const partnerIdx = 5 - firstIdx;
     const P1 = sorted[partnerIdx];
-    const others = sorted.filter((_, i) => i !== yeomIdx && i !== partnerIdx);
-    // others: 4명, NTRP 순 → PairB=(강+약), PairC=(중+중)
-    const [B1, B2, B3, B4] = others; // sorted desc
+    const others = sorted.filter((_, i) => i !== firstIdx && i !== partnerIdx);
+    const [B1, B2, B3, B4] = others;
     const pairB: [Player, Player] = [B1, B4];
     const pairC: [Player, Player] = [B2, B3];
 
@@ -256,11 +260,11 @@ export default function SessionDetailPage() {
     });
 
     const generated: Omit<Match, 'id'>[] = [
-      mk(1, Y, pairB[0], P1, pairB[1]),   // 염주호 1라운드
-      mk(2, Y, pairC[0], P1, pairC[1]),   // 염주호 2라운드
-      mk(3, pairB[0], pairC[0], pairB[1], pairC[1]), // 염주호 휴식
-      mk(4, Y, pairB[1], P1, pairB[0]),   // 염주호 4라운드 (PairB 파트너 교환)
-      mk(5, Y, pairC[1], P1, pairC[0]),   // 염주호 5라운드 (PairC 파트너 교환)
+      mk(1, Y, pairB[0], P1, pairB[1]),
+      mk(2, Y, pairC[0], P1, pairC[1]),
+      mk(3, pairB[0], pairC[0], pairB[1], pairC[1]),
+      mk(4, Y, pairB[1], P1, pairB[0]),
+      mk(5, Y, pairC[1], P1, pairC[0]),
     ];
 
     await saveMatches(session!.id, generated);
@@ -617,6 +621,43 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* Monday Schedule Modal */}
+      {showMondayModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-800">월요일 편성 — 첫 경기 선수 선택</h3>
+              <p className="text-xs text-slate-500 mt-1">선택한 선수가 R1·R2 먼저 뛰고 R3 쉬고 R4·R5 뜁니다.</p>
+            </div>
+            <div className="px-5 py-4 space-y-2">
+              {attendingPlayers.filter(p => p.gender === 'male').map(p => (
+                <label key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer hover:bg-slate-50 transition-colors"
+                  style={{ borderColor: mondayFirstPlayer === p.name ? '#6366f1' : '#e2e8f0', backgroundColor: mondayFirstPlayer === p.name ? '#eef2ff' : '' }}>
+                  <input
+                    type="radio"
+                    name="mondayFirst"
+                    checked={mondayFirstPlayer === p.name}
+                    onChange={() => setMondayFirstPlayer(p.name)}
+                    className="accent-indigo-600"
+                  />
+                  <span className="font-medium text-slate-800">{p.name}</span>
+                  <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                </label>
+              ))}
+            </div>
+            <div className="px-5 py-4 border-t border-slate-100 flex gap-2 justify-end">
+              <button onClick={() => setShowMondayModal(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">취소</button>
+              <button
+                onClick={handleMondayGenerate}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 font-medium"
+              >
+                편성 생성
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Generate Settings Modal */}
       {showGenerateModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -752,7 +793,7 @@ export default function SessionDetailPage() {
               )}
               {isSuperAdmin && !editMode && (
                 <button
-                  onClick={handleMondayGenerate}
+                  onClick={handleMondayClick}
                   className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
                 >
                   월요일 편성
