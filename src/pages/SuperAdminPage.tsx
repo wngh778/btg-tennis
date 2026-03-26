@@ -39,6 +39,9 @@ export default function SuperAdminPage() {
   const [bulkCreating, setBulkCreating] = useState(false);
   const [bulkResults, setBulkResults] = useState<string[]>([]);
 
+  // User filter
+  const [userFilterClubId, setUserFilterClubId] = useState('');
+
   useEffect(() => {
     if (!loading && (!user || !isSuperAdmin)) {
       navigate('/');
@@ -299,15 +302,28 @@ export default function SuperAdminPage() {
 
       {/* --- 사용자 관리 --- */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl">
-          <h2 className="font-semibold text-slate-700">전체 사용자 ({appUsers.length}명)</h2>
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl flex items-center justify-between gap-3">
+          <h2 className="font-semibold text-slate-700 whitespace-nowrap">
+            사용자 ({userFilterClubId ? appUsers.filter(u => u.clubIds.includes(userFilterClubId)).length : appUsers.length}명)
+          </h2>
+          <select
+            value={userFilterClubId}
+            onChange={e => setUserFilterClubId(e.target.value)}
+            className="border border-slate-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          >
+            <option value="">전체</option>
+            {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
         </div>
         <div className="scrollable-box" style={{ maxHeight: '400px' }}>
           <div className="divide-y divide-slate-100">
-            {appUsers.length === 0 ? (
-              <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 사용자가 없습니다.</p>
-            ) : (
-              appUsers.map(u => (
+            {(() => {
+              const filtered = userFilterClubId
+                ? appUsers.filter(u => u.clubIds.includes(userFilterClubId))
+                : appUsers;
+              if (filtered.length === 0)
+                return <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 사용자가 없습니다.</p>;
+              return filtered.map(u => (
                 <UserRow
                   key={u.id}
                   user={u}
@@ -317,8 +333,8 @@ export default function SuperAdminPage() {
                   onResetPassword={handleResetPassword}
                   onDelete={handleDeleteUser}
                 />
-              ))
-            )}
+              ));
+            })()}
           </div>
         </div>
       </div>
