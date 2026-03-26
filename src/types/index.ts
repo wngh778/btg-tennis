@@ -5,6 +5,7 @@ export interface Club {
   name: string;
   defaultCourts: number;
   color: string;
+  dayOfWeek: string;
   createdAt: Date;
 }
 

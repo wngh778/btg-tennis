@@ -41,7 +41,7 @@ export default function HomePage() {
     <div className="space-y-6">
       <div className="text-white rounded-2xl p-8 shadow-md" style={{ background: `linear-gradient(135deg, ${currentClub?.color ?? '#15803d'}, ${currentClub?.color ?? '#15803d'}99)` }}>
         <h1 className="text-3xl font-bold mb-2">🎾 {currentClub?.name ?? '테니스 대진표'}</h1>
-        <p className="text-green-200 text-sm mt-1">{currentClub ? `${currentClub.defaultCourts}개 코트 · 복식 경기` : ''}</p>
+        <p className="text-white/70 text-sm mt-1">{currentClub ? `매주 ${currentClub.dayOfWeek} · ${currentClub.defaultCourts}개 코트 · 복식 경기` : ''}</p>
       </div>
 
       {loading ? (

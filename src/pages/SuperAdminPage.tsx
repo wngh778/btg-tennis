@@ -21,6 +21,7 @@ export default function SuperAdminPage() {
   const [newClubName, setNewClubName] = useState('');
   const [newClubCourts, setNewClubCourts] = useState(4);
   const [newClubColor, setNewClubColor] = useState('#15803d');
+  const [newClubDay, setNewClubDay] = useState('일요일');
   const [editClub, setEditClub] = useState<Club | null>(null);
   const [clubSaving, setClubSaving] = useState(false);
 
@@ -63,10 +64,11 @@ export default function SuperAdminPage() {
     e.preventDefault();
     setClubSaving(true);
     try {
-      await addClub({ name: newClubName.trim(), defaultCourts: newClubCourts, color: newClubColor });
+      await addClub({ name: newClubName.trim(), defaultCourts: newClubCourts, color: newClubColor, dayOfWeek: newClubDay });
       setNewClubName('');
       setNewClubCourts(4);
       setNewClubColor('#15803d');
+      setNewClubDay('일요일');
       load();
     } finally {
       setClubSaving(false);
@@ -78,7 +80,7 @@ export default function SuperAdminPage() {
     if (!editClub) return;
     setClubSaving(true);
     try {
-      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts, color: editClub.color });
+      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts, color: editClub.color, dayOfWeek: editClub.dayOfWeek });
       setEditClub(null);
       load();
     } finally {
@@ -234,6 +236,13 @@ export default function SuperAdminPage() {
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
                     <select
+                      value={editClub.dayOfWeek}
+                      onChange={e => setEditClub({ ...editClub, dayOfWeek: e.target.value })}
+                      className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                    >
+                      {['월요일','화요일','수요일','목요일','금요일','토요일','일요일'].map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select
                       value={editClub.defaultCourts}
                       onChange={e => setEditClub({ ...editClub, defaultCourts: parseInt(e.target.value) })}
                       className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
@@ -256,7 +265,7 @@ export default function SuperAdminPage() {
                       <div className="w-4 h-4 rounded-full border border-slate-200" style={{ backgroundColor: club.color ?? '#15803d' }} />
                       <div>
                         <p className="font-medium text-slate-800">{club.name}</p>
-                        <p className="text-xs text-slate-400">기본 코트 {club.defaultCourts}개</p>
+                        <p className="text-xs text-slate-400">{club.dayOfWeek} · {club.defaultCourts}코트</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -279,6 +288,13 @@ export default function SuperAdminPage() {
               placeholder="클럽 이름"
               className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             />
+            <select
+              value={newClubDay}
+              onChange={e => setNewClubDay(e.target.value)}
+              className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+            >
+              {['월요일','화요일','수요일','목요일','금요일','토요일','일요일'].map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
             <select
               value={newClubCourts}
               onChange={e => setNewClubCourts(parseInt(e.target.value))}
