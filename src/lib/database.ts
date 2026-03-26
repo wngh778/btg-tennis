@@ -441,12 +441,14 @@ export async function updateAppUser(uid: string, data: Partial<{
   if (data.role !== undefined) update.role = data.role;
   if (data.clubIds !== undefined) update.club_ids = data.clubIds;
   if (data.defaultClubId !== undefined) update.default_club_id = data.defaultClubId;
-  const { error } = await supabase.from('app_users').update(update).eq('id', uid);
+  const client = supabaseAdmin ?? supabase;
+  const { error } = await client.from('app_users').update(update).eq('id', uid);
   if (error) throw error;
 }
 
 export async function getAllAppUsers(): Promise<AppUser[]> {
-  const { data, error } = await supabase
+  const client = supabaseAdmin ?? supabase;
+  const { data, error } = await client
     .from('app_users')
     .select('*')
     .order('created_at');
@@ -455,7 +457,8 @@ export async function getAllAppUsers(): Promise<AppUser[]> {
 }
 
 export async function getClubUsers(clubId: string): Promise<AppUser[]> {
-  const { data, error } = await supabase
+  const client = supabaseAdmin ?? supabase;
+  const { data, error } = await client
     .from('app_users')
     .select('*')
     .contains('club_ids', [clubId])
@@ -465,7 +468,8 @@ export async function getClubUsers(clubId: string): Promise<AppUser[]> {
 }
 
 export async function deleteAppUser(uid: string): Promise<void> {
-  const { error } = await supabase.from('app_users').delete().eq('id', uid);
+  const client = supabaseAdmin ?? supabase;
+  const { error } = await client.from('app_users').delete().eq('id', uid);
   if (error) throw error;
 }
 
