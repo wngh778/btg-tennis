@@ -3,11 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import {
   getClubs, addClub, updateClub, deleteClub,
   getAllAppUsers, updateAppUser, deleteAppUser, resetUserPassword, usernameToEmail,
-  getMembers,
+  getMembers, addMember, deleteMember,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import type { Club, AppUser } from '../types';
+import type { Club, AppUser, Member, Gender } from '../types';
+import { NTRP_OPTIONS } from '../utils/matchmaking';
 
 export default function SuperAdminPage() {
   const { user, isSuperAdmin, loading } = useAuth();
@@ -42,6 +43,22 @@ export default function SuperAdminPage() {
 
   // User filter
   const [userFilterClubId, setUserFilterClubId] = useState('');
+
+  // Member management
+  const [memberClubId, setMemberClubId] = useState('');
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  // New member form
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberGender, setNewMemberGender] = useState<Gender>('male');
+  const [newMemberNtrp, setNewMemberNtrp] = useState(3.0);
+  const [memberSaving, setMemberSaving] = useState(false);
+  // Import from another club
+  const [importSourceClubId, setImportSourceClubId] = useState('');
+  const [importSourceMembers, setImportSourceMembers] = useState<Member[]>([]);
+  const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     if (!loading && (!user || !isSuperAdmin)) {
@@ -207,6 +224,65 @@ export default function SuperAdminPage() {
     } finally {
       setBulkCreating(false);
     }
+  };
+
+  const loadMembers = async (clubId: string) => {
+    if (!clubId) { setMembers([]); return; }
+    setLoadingMembers(true);
+    const m = await getMembers(clubId);
+    setMembers(m);
+    setLoadingMembers(false);
+  };
+
+  const handleMemberClubChange = (clubId: string) => {
+    setMemberClubId(clubId);
+    setShowImport(false);
+    setImportSourceClubId('');
+    setImportSourceMembers([]);
+    setImportSelected(new Set());
+    loadMembers(clubId);
+  };
+
+  const handleAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!memberClubId) return;
+    setMemberSaving(true);
+    await addMember({ clubId: memberClubId, name: newMemberName.trim(), gender: newMemberGender, ntrp: newMemberNtrp, isActive: true });
+    setNewMemberName('');
+    setNewMemberGender('male');
+    setNewMemberNtrp(3.0);
+    setMemberSaving(false);
+    loadMembers(memberClubId);
+  };
+
+  const handleDeleteMember = async (member: Member) => {
+    if (!confirm(`"${member.name}" 회원을 삭제하시겠습니까?`)) return;
+    await deleteMember(member.id);
+    loadMembers(memberClubId);
+  };
+
+  const handleImportSourceChange = async (clubId: string) => {
+    setImportSourceClubId(clubId);
+    setImportSelected(new Set());
+    if (!clubId) { setImportSourceMembers([]); return; }
+    const m = await getMembers(clubId);
+    // 이미 대상 클럽에 있는 이름 제외
+    const existingNames = new Set(members.map(m => m.name));
+    setImportSourceMembers(m.filter(m => !existingNames.has(m.name)));
+  };
+
+  const handleImport = async () => {
+    if (!memberClubId || importSelected.size === 0) return;
+    setImporting(true);
+    for (const m of importSourceMembers.filter(m => importSelected.has(m.id))) {
+      await addMember({ clubId: memberClubId, name: m.name, gender: m.gender, ntrp: m.ntrp, isActive: true });
+    }
+    setImporting(false);
+    setShowImport(false);
+    setImportSourceClubId('');
+    setImportSourceMembers([]);
+    setImportSelected(new Set());
+    loadMembers(memberClubId);
   };
 
   if (loading || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
@@ -461,6 +537,161 @@ export default function SuperAdminPage() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* --- 회원 관리 --- */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl flex items-center justify-between gap-3">
+          <h2 className="font-semibold text-slate-700 whitespace-nowrap">회원 관리</h2>
+          <select
+            value={memberClubId}
+            onChange={e => handleMemberClubChange(e.target.value)}
+            className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          >
+            <option value="">클럽 선택</option>
+            {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {memberClubId ? (
+          <>
+            {/* 회원 목록 */}
+            <div className="scrollable-box divide-y divide-slate-100" style={{ maxHeight: '320px' }}>
+              {loadingMembers ? (
+                <p className="px-5 py-4 text-slate-400 text-sm text-center">불러오는 중...</p>
+              ) : members.length === 0 ? (
+                <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 회원이 없습니다.</p>
+              ) : (
+                members.map(m => (
+                  <div key={m.id} className="px-5 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                      <span className="font-medium text-slate-800">{m.name}</span>
+                      <span className="text-xs text-slate-400">{m.gender === 'male' ? '남' : '여'} · {m.ntrp.toFixed(1)}</span>
+                      {!m.isActive && <span className="text-xs bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">비활동</span>}
+                    </div>
+                    <button onClick={() => handleDeleteMember(m)} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 신규 회원 추가 폼 */}
+            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50">
+              <p className="text-xs font-medium text-slate-500 mb-3">신규 회원 추가</p>
+              <form onSubmit={handleAddMember} className="flex items-end gap-2 flex-wrap">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">이름</label>
+                  <input
+                    value={newMemberName}
+                    onChange={e => setNewMemberName(e.target.value)}
+                    required
+                    placeholder="이름"
+                    className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-28"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">성별</label>
+                  <select
+                    value={newMemberGender}
+                    onChange={e => setNewMemberGender(e.target.value as Gender)}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                  >
+                    <option value="male">남</option>
+                    <option value="female">여</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">NTRP</label>
+                  <select
+                    value={newMemberNtrp}
+                    onChange={e => setNewMemberNtrp(parseFloat(e.target.value))}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                  >
+                    {NTRP_OPTIONS.map(n => <option key={n} value={n}>{n.toFixed(1)}</option>)}
+                  </select>
+                </div>
+                <button type="submit" disabled={memberSaving} className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap">
+                  {memberSaving ? '추가 중...' : '+ 추가'}
+                </button>
+              </form>
+            </div>
+
+            {/* 다른 클럽에서 가져오기 */}
+            <div className="px-5 py-4 border-t border-slate-100">
+              <button
+                onClick={() => setShowImport(v => !v)}
+                className="text-sm text-blue-600 font-medium hover:text-blue-800"
+              >
+                {showImport ? '▲ 닫기' : '▼ 다른 클럽 회원 가져오기'}
+              </button>
+              {showImport && (
+                <div className="mt-3 space-y-3">
+                  <select
+                    value={importSourceClubId}
+                    onChange={e => handleImportSourceChange(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">가져올 클럽 선택</option>
+                    {clubs.filter(c => c.id !== memberClubId).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  {importSourceClubId && (
+                    importSourceMembers.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-2">가져올 회원이 없습니다 (이미 모두 등록됨)</p>
+                    ) : (
+                      <>
+                        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                          <div className="px-4 py-2 bg-slate-50 flex items-center justify-between">
+                            <span className="text-xs text-slate-500">{importSourceMembers.length}명 (이미 등록된 회원 제외)</span>
+                            <button
+                              type="button"
+                              onClick={() => setImportSelected(
+                                importSelected.size === importSourceMembers.length
+                                  ? new Set()
+                                  : new Set(importSourceMembers.map(m => m.id))
+                              )}
+                              className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                              {importSelected.size === importSourceMembers.length ? '전체 해제' : '전체 선택'}
+                            </button>
+                          </div>
+                          {importSourceMembers.map(m => (
+                            <label key={m.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={importSelected.has(m.id)}
+                                onChange={e => {
+                                  const s = new Set(importSelected);
+                                  e.target.checked ? s.add(m.id) : s.delete(m.id);
+                                  setImportSelected(s);
+                                }}
+                                className="rounded"
+                              />
+                              <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                              <span className="font-medium text-slate-800 flex-1">{m.name}</span>
+                              <span className="text-xs text-slate-400">{m.gender === 'male' ? '남' : '여'} · {m.ntrp.toFixed(1)}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <button
+                          onClick={handleImport}
+                          disabled={importing || importSelected.size === 0}
+                          className="w-full py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+                        >
+                          {importing ? '가져오는 중...' : `선택한 ${importSelected.size}명 가져오기`}
+                        </button>
+                      </>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="px-5 py-6 text-slate-400 text-sm text-center">클럽을 선택하면 회원 목록이 표시됩니다.</p>
+        )}
       </div>
     </div>
   );
