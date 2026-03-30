@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { supabaseAdmin } from './supabaseAdmin';
-import type { Club, Member, Session, AttendanceRecord, Match, Guest, AppUser } from '../types';
+import type { Club, Member, Session, AttendanceRecord, Match, Guest, AppUser, SessionGroup, GameMode } from '../types';
 
 // username → email conversion (same as before)
 export function usernameToEmail(username: string): string {
@@ -132,6 +132,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     clubId: row.club_id as string,
     date: row.date as string,
     type: row.type as Session['type'],
+    gameMode: (row.game_mode as GameMode) ?? 'normal',
     courts: row.courts as number,
     rounds: row.rounds as number,
     mixedRounds: row.mixed_rounds as number,
@@ -174,6 +175,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
       club_id: data.clubId,
       date: data.date,
       type: data.type,
+      game_mode: data.gameMode ?? 'normal',
       courts: data.courts,
       rounds: data.rounds,
       mixed_rounds: data.mixedRounds,
@@ -192,6 +194,7 @@ export async function updateSession(id: string, data: Partial<Omit<Session, 'id'
   const update: Record<string, unknown> = {};
   if (data.date !== undefined) update.date = data.date;
   if (data.type !== undefined) update.type = data.type;
+  if (data.gameMode !== undefined) update.game_mode = data.gameMode;
   if (data.courts !== undefined) update.courts = data.courts;
   if (data.rounds !== undefined) update.rounds = data.rounds;
   if (data.mixedRounds !== undefined) update.mixed_rounds = data.mixedRounds;
@@ -309,6 +312,7 @@ function rowToMatch(row: Record<string, unknown>): Match {
     score1: row.score1 as string | undefined,
     score2: row.score2 as string | undefined,
     isCompleted: row.is_completed as boolean,
+    groupId: (row.group_id as string | undefined) ?? undefined,
   };
 }
 
@@ -342,6 +346,7 @@ export async function saveMatches(sessionId: string, matches: Omit<Match, 'id'>[
     score1: m.score1 ?? null,
     score2: m.score2 ?? null,
     is_completed: m.isCompleted,
+    group_id: m.groupId ?? null,
   }));
 
   const { error } = await supabase.from('matches').insert(rows);
@@ -359,6 +364,7 @@ export async function insertMatch(match: Omit<Match, 'id'>): Promise<string> {
     score1: match.score1 ?? null,
     score2: match.score2 ?? null,
     is_completed: match.isCompleted,
+    group_id: match.groupId ?? null,
   }).select('id').single();
   if (error) throw error;
   return data.id;
@@ -379,7 +385,7 @@ export async function updateMatchScore(id: string, score1: string, score2: strin
 
 export async function updateMatch(
   id: string,
-  data: Partial<Pick<Match, 'team1' | 'team2' | 'round' | 'court' | 'matchType' | 'score1' | 'score2' | 'isCompleted'>>
+  data: Partial<Pick<Match, 'team1' | 'team2' | 'round' | 'court' | 'matchType' | 'score1' | 'score2' | 'isCompleted' | 'groupId'>>
 ): Promise<void> {
   const update: Record<string, unknown> = {};
   if (data.team1 !== undefined) update.team1 = data.team1;
@@ -390,6 +396,7 @@ export async function updateMatch(
   if (data.score1 !== undefined) update.score1 = data.score1;
   if (data.score2 !== undefined) update.score2 = data.score2;
   if (data.isCompleted !== undefined) update.is_completed = data.isCompleted;
+  if (data.groupId !== undefined) update.group_id = data.groupId ?? null;
   const { error } = await supabase.from('matches').update(update).eq('id', id);
   if (error) throw error;
 }
@@ -512,5 +519,51 @@ export async function isAdmin(uid: string): Promise<boolean> {
 export async function resetUserPassword(userId: string): Promise<void> {
   if (!supabaseAdmin) throw new Error('SERVICE_ROLE_KEY가 설정되지 않았습니다.');
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password: '123456' });
+  if (error) throw error;
+}
+
+// --- Session Groups ---
+function rowToSessionGroup(row: Record<string, unknown>): SessionGroup {
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    name: row.name as string,
+    orderNum: row.order_num as number,
+    memberIds: (row.member_ids as string[]) ?? [],
+    createdAt: new Date(row.created_at as string),
+  };
+}
+
+export async function getSessionGroups(sessionId: string): Promise<SessionGroup[]> {
+  const { data, error } = await supabase
+    .from('session_groups')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('order_num');
+  if (error) throw error;
+  return (data ?? []).map(rowToSessionGroup);
+}
+
+export async function addSessionGroup(data: { sessionId: string; name: string; orderNum: number }): Promise<string> {
+  const { data: inserted, error } = await supabase
+    .from('session_groups')
+    .insert({ session_id: data.sessionId, name: data.name, order_num: data.orderNum, member_ids: [] })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return inserted.id;
+}
+
+export async function updateSessionGroup(id: string, data: Partial<{ name: string; orderNum: number; memberIds: string[] }>): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (data.name !== undefined) update.name = data.name;
+  if (data.orderNum !== undefined) update.order_num = data.orderNum;
+  if (data.memberIds !== undefined) update.member_ids = data.memberIds;
+  const { error } = await supabase.from('session_groups').update(update).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteSessionGroup(id: string): Promise<void> {
+  const { error } = await supabase.from('session_groups').delete().eq('id', id);
   if (error) throw error;
 }

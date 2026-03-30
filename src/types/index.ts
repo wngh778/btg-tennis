@@ -28,12 +28,14 @@ export interface Guest {
 }
 
 export type SessionType = 'weekly' | 'quarterly';
+export type GameMode = 'normal' | 'group';
 
 export interface Session {
   id: string;
   clubId: string;
   date: string; // YYYY-MM-DD
   type: SessionType;
+  gameMode: GameMode;
   courts: number; // default 4
   rounds: number; // default 6
   mixedRounds: number; // 혼복 라운드 수 (weekly only)
@@ -41,6 +43,15 @@ export interface Session {
   isGenerated: boolean;
   isConfirmed: boolean;
   trackLate: boolean; // 지각여부 추적 여부
+  createdAt: Date;
+}
+
+export interface SessionGroup {
+  id: string;
+  sessionId: string;
+  name: string;
+  orderNum: number;
+  memberIds: string[];
   createdAt: Date;
 }
 
@@ -83,6 +94,7 @@ export interface Match {
   score1?: string; // e.g. "6"
   score2?: string;
   isCompleted: boolean;
+  groupId?: string;
 }
 
 export interface AdminUser {

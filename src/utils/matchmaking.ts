@@ -349,3 +349,88 @@ export function isVotingOpen(deadline: string | null): boolean {
 }
 
 export const NTRP_OPTIONS = [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
+
+// 조별경기 대진 생성 - NTRP 고려 없음, 인원당 경기횟수 균등
+function groupPairScore(history: PlayerHistory, p1: Player, p2: Player): number {
+  return getPartnerCount(history, p1.id, p2.id) * 3;
+}
+
+function groupMatchScore(history: PlayerHistory, team1: Team, team2: Team): number {
+  const ps1 = groupPairScore(history, team1.player1, team1.player2);
+  const ps2 = groupPairScore(history, team2.player1, team2.player2);
+  let opPenalty = 0;
+  for (const p1 of [team1.player1, team1.player2]) {
+    for (const p2 of [team2.player1, team2.player2]) {
+      opPenalty += getOpponentCount(history, p1.id, p2.id);
+    }
+  }
+  return ps1 + ps2 + opPenalty;
+}
+
+export interface GroupGenerateOptions {
+  sessionId: string;
+  groupId: string;
+  players: Player[];
+  courts: number;
+  totalRounds: number;
+}
+
+export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match, 'id'>[] {
+  const { sessionId, groupId, players, courts, totalRounds } = options;
+  if (players.length < 4) return [];
+
+  const history: PlayerHistory = new Map();
+  const gameCounts = new Map<string, number>();
+  players.forEach(p => gameCounts.set(p.id, 0));
+
+  const allMatches: Omit<Match, 'id'>[] = [];
+
+  for (let round = 1; round <= totalRounds; round++) {
+    const activeCourts = Math.min(courts, Math.floor(players.length / 4));
+    if (activeCourts === 0) continue;
+
+    const sorted = [...players].sort((a, b) => {
+      const diff = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
+      return diff !== 0 ? diff : Math.random() - 0.5;
+    });
+    const playing = sorted.slice(0, activeCourts * 4);
+
+    let bestScore = Infinity;
+    let bestMatches: Array<{ team1: Team; team2: Team }> = [];
+
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const shuffled = shuffle(playing);
+      const roundMatches: Array<{ team1: Team; team2: Team }> = [];
+      let totalScore = 0;
+      for (let c = 0; c < activeCourts; c++) {
+        const [p1, p2, p3, p4] = shuffled.slice(c * 4, c * 4 + 4);
+        const t1: Team = { player1: p1, player2: p2 };
+        const t2: Team = { player1: p3, player2: p4 };
+        totalScore += groupMatchScore(history, t1, t2);
+        roundMatches.push({ team1: t1, team2: t2 });
+      }
+      if (totalScore < bestScore) {
+        bestScore = totalScore;
+        bestMatches = roundMatches;
+      }
+    }
+
+    updateHistory(history, bestMatches);
+    playing.forEach(p => gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1));
+
+    bestMatches.forEach((m, i) => {
+      allMatches.push({
+        sessionId,
+        groupId,
+        round,
+        court: i + 1,
+        matchType: 'male' as const, // 조별경기는 matchType 구분 없이 male로 통일 (UI에서 "복식"으로 표시)
+        team1: m.team1,
+        team2: m.team2,
+        isCompleted: false,
+      });
+    });
+  }
+
+  return allMatches;
+}

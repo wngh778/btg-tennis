@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getSessions, addSession, updateSession, deleteSession } from '../lib/database';
+import { getSessions, addSession, updateSession, deleteSession, addSessionGroup } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { getNextSunday } from '../utils/matchmaking';
-import type { Session, SessionType } from '../types';
+import type { Session, SessionType, GameMode } from '../types';
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -27,6 +27,8 @@ function SessionForm({
   initialValues: {
     date: string;
     type: SessionType;
+    gameMode: GameMode;
+    groupCount: number;
     courts: number;
     rounds: number;
     mixedRounds: number;
@@ -36,6 +38,8 @@ function SessionForm({
   onSubmit: (values: {
     date: string;
     type: SessionType;
+    gameMode: GameMode;
+    groupCount: number;
     courts: number;
     rounds: number;
     mixedRounds: number;
@@ -48,6 +52,8 @@ function SessionForm({
 }) {
   const [date, setDate] = useState(initialValues.date);
   const [type, setType] = useState<SessionType>(initialValues.type);
+  const [gameMode, setGameMode] = useState<GameMode>(initialValues.gameMode);
+  const [groupCount, setGroupCount] = useState(initialValues.groupCount);
   const [courts, setCourts] = useState(initialValues.courts);
   const [rounds, setRounds] = useState(initialValues.rounds);
   const [mixedRounds, setMixedRounds] = useState(initialValues.mixedRounds);
@@ -81,6 +87,8 @@ function SessionForm({
     await onSubmit({
       date,
       type,
+      gameMode,
+      groupCount,
       courts,
       rounds,
       mixedRounds: type === 'quarterly' ? 0 : mixedRounds,
@@ -114,6 +122,46 @@ function SessionForm({
             <option value="quarterly">분기대회</option>
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">경기 모드</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setGameMode('normal')}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${gameMode === 'normal' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            일반경기
+          </button>
+          <button
+            type="button"
+            onClick={() => setGameMode('group')}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${gameMode === 'group' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            조별경기
+          </button>
+        </div>
+      </div>
+      {gameMode === 'group' && (
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">조 갯수</label>
+          <div className="flex gap-2">
+            {[2,3,4,5,6].map(n => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setGroupCount(n)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${groupCount === n ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {n}조
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">코트 수</label>
           <select
@@ -209,12 +257,19 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
 
   const handleSubmit = async (values: Parameters<React.ComponentProps<typeof SessionForm>['onSubmit']>[0]) => {
     if (!currentClub) return;
-    await addSession({
+    const { groupCount, ...sessionData } = values;
+    const sessionId = await addSession({
       clubId: currentClub.id,
-      ...values,
+      ...sessionData,
       isGenerated: false,
       isConfirmed: false,
     });
+    if (values.gameMode === 'group') {
+      for (let i = 0; i < groupCount; i++) {
+        const groupName = String.fromCharCode(65 + i) + '조'; // A조, B조, ...
+        await addSessionGroup({ sessionId, name: groupName, orderNum: i });
+      }
+    }
     onSave();
   };
 
@@ -223,6 +278,8 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
       initialValues={{
         date: nextSunday,
         type: 'weekly',
+        gameMode: 'normal',
+        groupCount: 2,
         courts: defaultCourts,
         rounds: 6,
         mixedRounds: 2,
@@ -239,7 +296,8 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
 
 function EditSessionForm({ session, onSave, onCancel }: { session: Session; onSave: () => void; onCancel: () => void }) {
   const handleSubmit = async (values: Parameters<React.ComponentProps<typeof SessionForm>['onSubmit']>[0]) => {
-    await updateSession(session.id, values);
+    const { groupCount: _groupCount, ...sessionData } = values;
+    await updateSession(session.id, sessionData);
     onSave();
   };
 
@@ -248,6 +306,8 @@ function EditSessionForm({ session, onSave, onCancel }: { session: Session; onSa
       initialValues={{
         date: session.date,
         type: session.type,
+        gameMode: session.gameMode ?? 'normal',
+        groupCount: 2,
         courts: session.courts,
         rounds: session.rounds,
         mixedRounds: session.mixedRounds,
@@ -367,6 +427,9 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
             }`}>
               {session.type === 'quarterly' ? '분기대회' : '주간'}
             </span>
+            {session.gameMode === 'group' && (
+              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">조별경기</span>
+            )}
             {session.isGenerated && (
               <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">대진 완료</span>
             )}

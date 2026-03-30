@@ -4,11 +4,12 @@ import {
   getSession, getMembers, getGuests, getAttendance,
   setAttendance, deleteAttendance, addGuest, deleteGuest,
   getMatches, saveMatches, insertMatch, deleteMatch, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
+  getSessionGroups, addSessionGroup, updateSessionGroup, deleteSessionGroup,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { generateMatches, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
-import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender } from '../types';
+import { generateMatches, generateGroupMatches, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
+import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -39,7 +40,9 @@ export default function SessionDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'vote' | 'bracket' | 'detail' | 'result'>('vote');
+  const [tab, setTab] = useState<'vote' | 'groups' | 'bracket' | 'detail' | 'result'>('vote');
+  const [groups, setGroups] = useState<SessionGroup[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   // Bracket editing
   const [editMode, setEditMode] = useState(false);
@@ -73,8 +76,8 @@ export default function SessionDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, g, a, mx] = await Promise.all([
-        getSession(id), getGuests(id), getAttendance(id), getMatches(id),
+      const [s, g, a, mx, grps] = await Promise.all([
+        getSession(id), getGuests(id), getAttendance(id), getMatches(id), getSessionGroups(id),
       ]);
       const clubId = s?.clubId ?? currentClub?.id;
       const m = clubId ? await getMembers(clubId) : [];
@@ -83,6 +86,7 @@ export default function SessionDetailPage() {
       setGuests(g);
       setAttendanceState(a);
       setMatches(mx);
+      setGroups(grps);
     } catch (e: unknown) {
       console.error(e);
       setError(e instanceof Error ? e.message : String(e));
@@ -468,6 +472,14 @@ export default function SessionDetailPage() {
 
   // 본인 계정에 연결된 멤버 (username === member.name)
   const myMember = appUser ? activeMembers.find(m => m.name === appUser.username) ?? null : null;
+  const myGroup = myMember ? groups.find(g => g.memberIds.includes(myMember.id)) ?? null : null;
+
+  // 조별경기: 내 그룹 자동 선택
+  useEffect(() => {
+    if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {
+      setSelectedGroupId(myGroup?.id ?? groups[0]?.id ?? null);
+    }
+  }, [groups, myGroup, session?.gameMode]);
   const myAttendanceRec = myMember ? attendance.find(a => a.playerId === myMember.id) ?? null : null;
   const myAttendance = myAttendanceRec?.attending ?? null;
   const myIsLate = myAttendanceRec?.isLate;
@@ -502,6 +514,41 @@ export default function SessionDetailPage() {
       for (const m of toDelete) await deleteMatch(m.id);
     }
     load();
+  };
+
+  const loadGroups = async () => {
+    if (!id) return;
+    const g = await getSessionGroups(id);
+    setGroups(g);
+  };
+
+  const handleGenerateGroupMatches = async (groupId: string | 'all') => {
+    setShowGenerateModal(false);
+    const targetGroups = groupId === 'all' ? groups : groups.filter(g => g.id === groupId);
+
+    for (const group of targetGroups) {
+      const groupPlayers = attendingPlayers.filter(p => group.memberIds.includes(p.id));
+      if (groupPlayers.length < 4) continue;
+
+      const generated = generateGroupMatches({
+        sessionId: session!.id,
+        groupId: group.id,
+        players: groupPlayers,
+        courts: generateCourts,
+        totalRounds: generateRounds,
+      });
+
+      // 해당 그룹의 기존 매치 삭제
+      const existingGroupMatches = matches.filter(m => m.groupId === group.id);
+      for (const m of existingGroupMatches) await deleteMatch(m.id);
+
+      // 새 매치 삽입
+      for (const m of generated) await insertMatch(m);
+    }
+
+    await updateSession(session!.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
+    load();
+    setTab('bracket');
   };
 
   // 선수별 경기 번호 계산 (몇 번째 경기인지)
@@ -565,6 +612,16 @@ export default function SessionDetailPage() {
         >
           참석 투표
         </button>
+        {session.gameMode === 'group' && isAdminUser && (
+          <button
+            onClick={() => setTab('groups')}
+            className={`flex-1 py-3 text-sm font-medium transition-colors ${
+              tab === 'groups' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            조 편성
+          </button>
+        )}
         <button
           onClick={() => setTab('bracket')}
           className={`flex-1 py-3 text-sm font-medium transition-colors ${
@@ -1099,6 +1156,28 @@ export default function SessionDetailPage() {
                 </div>
               )}
             </div>
+            {session.gameMode === 'group' && groups.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 생성 조</label>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleGenerateGroupMatches('all')}
+                    className="flex-1 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                  >
+                    전체 조
+                  </button>
+                  {groups.map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => handleGenerateGroupMatches(g.id)}
+                      className="flex-1 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 hover:bg-purple-100 hover:text-purple-700 transition-colors"
+                    >
+                      {g.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="px-6 py-4 border-t border-slate-100 flex gap-3">
               <button
                 onClick={() => setShowGenerateModal(false)}
@@ -1106,15 +1185,29 @@ export default function SessionDetailPage() {
               >
                 취소
               </button>
-              <button
-                onClick={handleGenerate}
-                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
-              >
-                {session.isGenerated ? '재생성' : '생성'}
-              </button>
+              {session.gameMode !== 'group' && (
+                <button
+                  onClick={handleGenerate}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+                >
+                  {session.isGenerated ? '재생성' : '생성'}
+                </button>
+              )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* Groups Tab */}
+      {tab === 'groups' && session.gameMode === 'group' && isAdminUser && (
+        <GroupsTab
+          groups={groups}
+          session={session}
+          members={members}
+          attendingPlayers={attendingPlayers}
+          onGroupsChanged={loadGroups}
+          isAdmin={isAdminUser}
+        />
       )}
 
       {/* Bracket Tab */}
@@ -1227,6 +1320,28 @@ export default function SessionDetailPage() {
             </div>
           )}
 
+          {session.gameMode === 'group' && (
+            <div className="flex gap-2 flex-wrap">
+              {isAdminUser && (
+                <button
+                  onClick={() => setSelectedGroupId(null)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === null ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  전체
+                </button>
+              )}
+              {groups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => setSelectedGroupId(g.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           {matches.length === 0 && !editMode ? (
             <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
               <p className="text-slate-400 text-lg mb-2">아직 대진표가 없습니다.</p>
@@ -1234,19 +1349,25 @@ export default function SessionDetailPage() {
             </div>
           ) : (() => {
             const displaySource = editMode ? pendingMatches : matches;
+            const filteredSource = session.gameMode === 'group' && selectedGroupId
+              ? displaySource.filter(m => m.groupId === selectedGroupId)
+              : displaySource;
+            const filteredMatches = session.gameMode === 'group' && selectedGroupId
+              ? matches.filter(m => m.groupId === selectedGroupId)
+              : matches;
             const displayRounds = editMode
               ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
-              : Array.from(new Set(displaySource.map(m => m.round))).sort((a, b) => a - b);
+              : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
             return displayRounds.map(round => (
               <RoundCard
                 key={round}
                 round={round}
-                matches={matches.filter(m => m.round === round)}
+                matches={filteredMatches.filter(m => m.round === round)}
                 attendingPlayers={attendingPlayers}
                 canEditScore={!!user && !session.isConfirmed}
                 onScoreUpdate={handleScoreUpdate}
                 editMode={editMode}
-                pendingMatches={displaySource.filter(m => m.round === round)}
+                pendingMatches={filteredSource.filter(m => m.round === round)}
                 substituteTarget={substituteTarget}
                 onPlayerClick={handlePlayerClick}
                 showNtrp={isAdminUser}
@@ -1275,7 +1396,16 @@ export default function SessionDetailPage() {
 
       {/* Result Tab */}
       {tab === 'result' && session.isConfirmed && (
-        <SessionResultTab attendingPlayers={attendingPlayers} matches={matches} />
+        session.gameMode === 'group' ? (
+          <GroupResultTab
+            groups={groups}
+            matches={matches}
+            attendingPlayers={attendingPlayers}
+            isAdmin={isAdminUser}
+          />
+        ) : (
+          <SessionResultTab attendingPlayers={attendingPlayers} matches={matches} />
+        )
       )}
     </div>
   );
@@ -1784,4 +1914,313 @@ function PlayerBadge({
   }
 
   return <div>{content}</div>;
+}
+
+function GroupResultTab({
+  groups, matches, attendingPlayers, isAdmin
+}: {
+  groups: SessionGroup[];
+  matches: Match[];
+  attendingPlayers: Player[];
+  isAdmin: boolean;
+}) {
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
+    groups.length > 0 ? groups[0].id : null
+  );
+  const showAll = isAdmin && selectedGroupId === null;
+
+  function calcGroupStandings(group: SessionGroup) {
+    const groupMatches = matches.filter(m => m.groupId === group.id && m.isCompleted);
+    const stats = new Map<string, { name: string; wins: number; losses: number; scoreDiff: number; games: number }>();
+
+    for (const pid of group.memberIds) {
+      const player = attendingPlayers.find(p => p.id === pid);
+      if (player) stats.set(pid, { name: player.name, wins: 0, losses: 0, scoreDiff: 0, games: 0 });
+    }
+
+    for (const m of groupMatches) {
+      if (m.score1 === undefined || m.score2 === undefined) continue;
+      const s1 = parseInt(m.score1, 10);
+      const s2 = parseInt(m.score2, 10);
+      if (isNaN(s1) || isNaN(s2)) continue;
+      const team1Won = s1 > s2;
+      const diff = s1 - s2;
+      for (const p of [m.team1.player1, m.team1.player2]) {
+        if (!stats.has(p.id)) stats.set(p.id, { name: p.name, wins: 0, losses: 0, scoreDiff: 0, games: 0 });
+        const s = stats.get(p.id)!;
+        s.games++;
+        if (team1Won) { s.wins++; s.scoreDiff += diff; } else { s.losses++; s.scoreDiff -= diff; }
+      }
+      for (const p of [m.team2.player1, m.team2.player2]) {
+        if (!stats.has(p.id)) stats.set(p.id, { name: p.name, wins: 0, losses: 0, scoreDiff: 0, games: 0 });
+        const s = stats.get(p.id)!;
+        s.games++;
+        if (!team1Won) { s.wins++; s.scoreDiff += diff; } else { s.losses++; s.scoreDiff -= diff; }
+      }
+    }
+
+    return [...stats.entries()]
+      .map(([id, s]) => ({ id, ...s }))
+      .sort((a, b) => b.wins - a.wins || b.scoreDiff - a.scoreDiff || a.name.localeCompare(b.name, 'ko'));
+  }
+
+  const medals = ['🥇', '🥈', '🥉'];
+
+  return (
+    <div className="space-y-4">
+      {/* 그룹 셀렉터 */}
+      <div className="flex gap-2 flex-wrap">
+        {isAdmin && (
+          <button
+            onClick={() => setSelectedGroupId(null)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === null ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            전체 통합
+          </button>
+        )}
+        {groups.map(g => (
+          <button
+            key={g.id}
+            onClick={() => setSelectedGroupId(g.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            {g.name}
+          </button>
+        ))}
+      </div>
+
+      {/* 조별 순위 */}
+      {!showAll && selectedGroupId && (() => {
+        const group = groups.find(g => g.id === selectedGroupId)!;
+        const standings = calcGroupStandings(group);
+        const groupMatches = matches.filter(m => m.groupId === group.id);
+        const completedCount = groupMatches.filter(m => m.isCompleted).length;
+        return (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <h2 className="font-bold text-slate-800 text-lg mb-1">{group.name} 순위</h2>
+              <p className="text-sm text-slate-500">{completedCount}/{groupMatches.length} 경기 완료</p>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-2 items-center">
+                <span className="text-xs font-semibold text-slate-400 w-8 text-center">순위</span>
+                <span className="text-xs font-semibold text-slate-500">이름</span>
+                <span className="text-xs font-semibold text-green-600 w-8 text-center">승</span>
+                <span className="text-xs font-semibold text-red-500 w-8 text-center">패</span>
+                <span className="text-xs font-semibold text-blue-600 w-12 text-center">득실</span>
+                <span className="text-xs font-semibold text-slate-500 w-10 text-center">게임</span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {standings.map((s, i) => (
+                  <div key={s.id} className={`px-5 py-3 grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-2 items-center ${i < 3 ? 'bg-gradient-to-r from-slate-50 to-white' : ''}`}>
+                    <div className="w-8 text-center">
+                      {i < 3 ? (
+                        <span className="text-lg">{medals[i]}</span>
+                      ) : (
+                        <span className="text-sm text-slate-400 font-medium">{i + 1}</span>
+                      )}
+                    </div>
+                    <span className={`font-medium text-sm ${i < 3 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}>{s.name}</span>
+                    <span className="text-sm font-bold text-green-600 w-8 text-center">{s.wins}</span>
+                    <span className="text-sm text-red-400 w-8 text-center">{s.losses}</span>
+                    <span className={`text-sm font-medium w-12 text-center ${s.scoreDiff > 0 ? 'text-blue-600' : s.scoreDiff < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                      {s.scoreDiff > 0 ? `+${s.scoreDiff}` : s.scoreDiff}
+                    </span>
+                    <span className="text-sm text-slate-400 w-10 text-center">{s.games}</span>
+                  </div>
+                ))}
+                {standings.length === 0 && (
+                  <div className="px-5 py-8 text-center text-slate-400 text-sm">아직 완료된 경기가 없습니다.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 전체 통합 뷰 (관리자) */}
+      {showAll && (
+        <div className="space-y-4">
+          {groups.map(group => {
+            const standings = calcGroupStandings(group);
+            const top3 = standings.slice(0, 3);
+            return (
+              <div key={group.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-3 bg-purple-50 border-b border-purple-100">
+                  <h3 className="font-bold text-purple-800">{group.name}</h3>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {top3.map((s, i) => (
+                    <div key={s.id} className="px-5 py-3 flex items-center gap-3">
+                      <span className="text-xl w-8">{medals[i] ?? ''}</span>
+                      <span className="font-semibold text-slate-800">{s.name}</span>
+                      <span className="ml-auto text-sm text-slate-500">{s.wins}승 {s.losses}패</span>
+                    </div>
+                  ))}
+                  {top3.length === 0 && (
+                    <div className="px-5 py-4 text-center text-slate-400 text-sm">아직 완료된 경기가 없습니다.</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GroupsTab({
+  groups, session, members: _members, attendingPlayers, onGroupsChanged, isAdmin: _isAdmin
+}: {
+  groups: SessionGroup[];
+  session: { id: string };
+  members: Member[];
+  attendingPlayers: Player[];
+  onGroupsChanged: () => void;
+  isAdmin: boolean;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+
+  const assignedIds = new Set(groups.flatMap(g => g.memberIds));
+  const unassigned = attendingPlayers.filter(p => !assignedIds.has(p.id));
+
+  const handleAddToGroup = async (groupId: string, playerId: string) => {
+    // 다른 그룹에서 제거
+    for (const g of groups) {
+      if (g.id !== groupId && g.memberIds.includes(playerId)) {
+        await updateSessionGroup(g.id, { memberIds: g.memberIds.filter(id => id !== playerId) });
+      }
+    }
+    const group = groups.find(g => g.id === groupId)!;
+    if (!group.memberIds.includes(playerId)) {
+      await updateSessionGroup(groupId, { memberIds: [...group.memberIds, playerId] });
+    }
+    onGroupsChanged();
+  };
+
+  const handleRemoveFromGroup = async (groupId: string, playerId: string) => {
+    const group = groups.find(g => g.id === groupId)!;
+    await updateSessionGroup(groupId, { memberIds: group.memberIds.filter(id => id !== playerId) });
+    onGroupsChanged();
+  };
+
+  const handleAddGroup = async () => {
+    const name = String.fromCharCode(65 + groups.length) + '조';
+    await addSessionGroup({ sessionId: session.id, name, orderNum: groups.length });
+    onGroupsChanged();
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (!confirm('이 조를 삭제하시겠습니까?')) return;
+    await deleteSessionGroup(groupId);
+    onGroupsChanged();
+  };
+
+  const handleRenameGroup = async (groupId: string) => {
+    if (!editName.trim()) return;
+    await updateSessionGroup(groupId, { name: editName.trim() });
+    setEditingId(null);
+    setEditName('');
+    onGroupsChanged();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 미배정 인원 */}
+      {unassigned.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          <h3 className="font-semibold text-amber-800 mb-2 text-sm">미배정 인원 ({unassigned.length}명)</h3>
+          <div className="flex flex-wrap gap-2">
+            {unassigned.map(p => (
+              <div key={p.id} className="flex items-center gap-1 bg-white border border-amber-200 rounded-lg px-2 py-1">
+                <span className={`w-2 h-2 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                <span className="text-sm font-medium text-slate-700">{p.name}</span>
+                <div className="flex gap-1 ml-1">
+                  {groups.map(g => (
+                    <button
+                      key={g.id}
+                      onClick={() => handleAddToGroup(g.id, p.id)}
+                      className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 rounded px-1.5 py-0.5 transition-colors"
+                    >
+                      {g.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 각 조 카드 */}
+      {groups.map(group => {
+        const groupPlayers = group.memberIds
+          .map(id => attendingPlayers.find(p => p.id === id))
+          .filter(Boolean) as Player[];
+        return (
+          <div key={group.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
+              {editingId === group.id ? (
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    className="border border-purple-300 rounded-lg px-2 py-1 text-sm flex-1 max-w-32 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    autoFocus
+                  />
+                  <button onClick={() => handleRenameGroup(group.id)} className="text-xs bg-purple-600 text-white px-2 py-1 rounded-lg">확인</button>
+                  <button onClick={() => setEditingId(null)} className="text-xs text-slate-500 px-2 py-1">취소</button>
+                </div>
+              ) : (
+                <>
+                  <h3 className="font-bold text-purple-800">{group.name} <span className="font-normal text-purple-600 text-sm">({groupPlayers.length}명)</span></h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setEditingId(group.id); setEditName(group.name); }}
+                      className="text-xs text-purple-600 hover:text-purple-800"
+                    >
+                      이름변경
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGroup(group.id)}
+                      className="text-xs text-red-400 hover:text-red-600"
+                    >
+                      조삭제
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="p-3 flex flex-wrap gap-2 min-h-12">
+              {groupPlayers.map(p => (
+                <div key={p.id} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                  <span className={`w-2 h-2 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                  <span className="text-sm font-medium text-slate-700">{p.name}</span>
+                  <button
+                    onClick={() => handleRemoveFromGroup(group.id, p.id)}
+                    className="text-slate-300 hover:text-red-500 ml-0.5 transition-colors"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {groupPlayers.length === 0 && (
+                <p className="text-sm text-slate-300 self-center">멤버를 배정하세요</p>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* 조 추가 버튼 */}
+      <button
+        onClick={handleAddGroup}
+        className="w-full py-3 border-2 border-dashed border-purple-200 rounded-2xl text-purple-500 hover:border-purple-400 hover:text-purple-700 text-sm font-medium transition-colors"
+      >
+        + 조 추가
+      </button>
+    </div>
+  );
 }
