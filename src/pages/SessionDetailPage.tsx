@@ -746,7 +746,7 @@ export default function SessionDetailPage() {
                           canVoteThis ? (
                             <button
                               onClick={() => handleMemberLate(m, !(rec?.isLate ?? false))}
-                              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                              className={`w-10 py-1 rounded text-xs font-medium text-center transition-colors ${
                                 rec?.isLate
                                   ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
                                   : 'bg-green-50 text-green-600 hover:bg-green-100'
@@ -755,7 +755,7 @@ export default function SessionDetailPage() {
                               {rec?.isLate ? '지각' : '정시'}
                             </button>
                           ) : (
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            <span className={`w-10 py-1 rounded text-xs font-medium text-center ${
                               rec?.isLate
                                 ? 'bg-orange-100 text-orange-600'
                                 : rec?.isLate === false
@@ -766,7 +766,7 @@ export default function SessionDetailPage() {
                             </span>
                           )
                         ) : (
-                          <span className="px-2 py-1 rounded text-xs font-medium bg-slate-50 text-slate-300">-</span>
+                          <span className="w-10 py-1 rounded text-xs font-medium text-center bg-slate-100 text-slate-300">-</span>
                         )
                       ) : null}
                     </div>
