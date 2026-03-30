@@ -1365,6 +1365,13 @@ export default function SessionDetailPage() {
             const filteredMatches = session.gameMode === 'group' && selectedGroupId
               ? matches.filter(m => m.groupId === selectedGroupId)
               : matches;
+            // 조별 필터: 휴식 인원도 해당 조 인원만 표시
+            const roundAttendingPlayers = session.gameMode === 'group' && selectedGroupId
+              ? (() => {
+                  const group = groups.find(g => g.id === selectedGroupId);
+                  return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
+                })()
+              : attendingPlayers;
             const displayRounds = editMode
               ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
               : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
@@ -1373,7 +1380,7 @@ export default function SessionDetailPage() {
                 key={round}
                 round={round}
                 matches={filteredMatches.filter(m => m.round === round)}
-                attendingPlayers={attendingPlayers}
+                attendingPlayers={roundAttendingPlayers}
                 canEditScore={!!user && !session.isConfirmed}
                 onScoreUpdate={handleScoreUpdate}
                 editMode={editMode}
@@ -1848,7 +1855,11 @@ function MatchCard({
               {canEditScore && !editMode && (
                 <button
                   onClick={() => setEditing(true)}
-                  className="text-xs text-slate-400 hover:text-green-600"
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    match.isCompleted
+                      ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      : 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
+                  }`}
                 >
                   {match.isCompleted ? '수정' : '입력'}
                 </button>
