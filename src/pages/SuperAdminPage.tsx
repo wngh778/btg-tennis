@@ -43,6 +43,7 @@ export default function SuperAdminPage() {
 
   // User filter
   const [userFilterClubId, setUserFilterClubId] = useState('');
+  const [showUserForm, setShowUserForm] = useState(false);
 
   // Member management
   const [memberClubId, setMemberClubId] = useState('');
@@ -276,12 +277,18 @@ export default function SuperAdminPage() {
     setImporting(true);
     for (const m of importSourceMembers.filter(m => importSelected.has(m.id))) {
       await addMember({ clubId: memberClubId, name: m.name, gender: m.gender, ntrp: m.ntrp, isActive: true });
+      // app_users에 해당 이름의 계정이 있으면 club_ids에도 추가
+      const appUser = appUsers.find(u => u.username === m.name);
+      if (appUser && !appUser.clubIds.includes(memberClubId)) {
+        await updateAppUser(appUser.id, { clubIds: [...appUser.clubIds, memberClubId] });
+      }
     }
     setImporting(false);
     setShowImport(false);
     setImportSourceClubId('');
     setImportSourceMembers([]);
     setImportSelected(new Set());
+    await load();
     loadMembers(memberClubId);
   };
 
@@ -398,14 +405,22 @@ export default function SuperAdminPage() {
           <h2 className="font-semibold text-slate-700 whitespace-nowrap">
             사용자 ({userFilterClubId ? appUsers.filter(u => u.clubIds.includes(userFilterClubId)).length : appUsers.length}명)
           </h2>
-          <select
-            value={userFilterClubId}
-            onChange={e => setUserFilterClubId(e.target.value)}
-            className="border border-slate-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            <option value="">전체</option>
-            {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={userFilterClubId}
+              onChange={e => setUserFilterClubId(e.target.value)}
+              className="border border-slate-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">전체</option>
+              {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button
+              onClick={() => { setUserError(''); setUserSuccess(''); setNewUsername(''); setNewPassword(''); setNewRole('member'); setNewUserClubs([]); setNewDefaultClub(''); setShowUserForm(v => !v); }}
+              className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 whitespace-nowrap"
+            >
+              + 추가
+            </button>
+          </div>
         </div>
         <div className="scrollable-box" style={{ maxHeight: '400px' }}>
           <div className="divide-y divide-slate-100">
@@ -429,6 +444,86 @@ export default function SuperAdminPage() {
             })()}
           </div>
         </div>
+        {showUserForm && (
+          <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
+            <form onSubmit={handleAddUser} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">아이디</label>
+                  <input
+                    value={newUsername}
+                    onChange={e => setNewUsername(e.target.value)}
+                    required
+                    placeholder="아이디"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">비밀번호</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    placeholder="최소 6자리"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">역할</label>
+                  <select
+                    value={newRole}
+                    onChange={e => setNewRole(e.target.value as AppUser['role'])}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="member">회원</option>
+                    <option value="admin">관리자</option>
+                    <option value="superadmin">슈퍼관리자</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">기본 클럽</label>
+                  <select
+                    value={newDefaultClub}
+                    onChange={e => setNewDefaultClub(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">없음</option>
+                    {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">소속 클럽</label>
+                <div className="flex flex-wrap gap-2">
+                  {clubs.map(c => (
+                    <label key={c.id} className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newUserClubs.includes(c.id)}
+                        onChange={e => {
+                          if (e.target.checked) setNewUserClubs(prev => [...prev, c.id]);
+                          else setNewUserClubs(prev => prev.filter(id => id !== c.id));
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-slate-700">{c.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {userError && <p className="text-red-500 text-sm">{userError}</p>}
+              {userSuccess && <p className="text-green-600 text-sm">{userSuccess}</p>}
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setShowUserForm(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">취소</button>
+                <button type="submit" disabled={userSaving} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {userSaving ? '추가 중...' : '사용자 추가'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
       </div>
 
       {/* --- 회원 일괄 계정 생성 --- */}
@@ -457,86 +552,6 @@ export default function SuperAdminPage() {
             {bulkResults.map((r, i) => <p key={i} className="text-xs text-slate-700">{r}</p>)}
           </div>
         )}
-      </div>
-
-      {/* --- 사용자 추가 폼 --- */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-        <h2 className="font-semibold text-slate-800 mb-4">사용자 추가</h2>
-        <form onSubmit={handleAddUser} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">아이디</label>
-              <input
-                value={newUsername}
-                onChange={e => setNewUsername(e.target.value)}
-                required
-                placeholder="아이디"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">비밀번호</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                required
-                minLength={6}
-                placeholder="최소 6자리"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">역할</label>
-              <select
-                value={newRole}
-                onChange={e => setNewRole(e.target.value as AppUser['role'])}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                <option value="member">회원</option>
-                <option value="admin">관리자</option>
-                <option value="superadmin">슈퍼관리자</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">기본 클럽</label>
-              <select
-                value={newDefaultClub}
-                onChange={e => setNewDefaultClub(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                <option value="">없음</option>
-                {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">소속 클럽 (복수 선택)</label>
-            <div className="flex flex-wrap gap-2">
-              {clubs.map(c => (
-                <label key={c.id} className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newUserClubs.includes(c.id)}
-                    onChange={e => {
-                      if (e.target.checked) setNewUserClubs(prev => [...prev, c.id]);
-                      else setNewUserClubs(prev => prev.filter(id => id !== c.id));
-                    }}
-                    className="rounded"
-                  />
-                  <span className="text-sm text-slate-700">{c.name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          {userError && <p className="text-red-500 text-sm">{userError}</p>}
-          {userSuccess && <p className="text-green-600 text-sm">{userSuccess}</p>}
-          <div className="flex justify-end">
-            <button type="submit" disabled={userSaving} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
-              {userSaving ? '추가 중...' : '사용자 추가'}
-            </button>
-          </div>
-        </form>
       </div>
 
       {/* --- 회원 관리 --- */}
