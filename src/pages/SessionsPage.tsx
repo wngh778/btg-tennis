@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { getSessions, addSession, updateSession, deleteSession } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { getNextSunday, getVotingDeadline } from '../utils/matchmaking';
+import { getNextSunday } from '../utils/matchmaking';
 import type { Session, SessionType } from '../types';
 
 function formatDate(dateStr: string) {
@@ -11,47 +11,94 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 }
 
-function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => void; onCancel: () => void; defaultCourts: number }) {
-  const { currentClub } = useClub();
-  const [date, setDate] = useState(getNextSunday());
-  const [type, setType] = useState<SessionType>('weekly');
-  const [courts, setCourts] = useState(defaultCourts);
-  const [rounds, setRounds] = useState(6);
-  const [mixedRounds, setMixedRounds] = useState(2);
-  const [deadlineDay, setDeadlineDay] = useState<'friday' | 'saturday'>('saturday');
-  const [trackLate, setTrackLate] = useState(false);
+function getDefaultDeadlineDate(sessionDate: string): string {
+  const d = new Date(sessionDate + 'T00:00:00');
+  d.setDate(d.getDate() - 1); // 하루 전 (토요일)
+  return d.toISOString().split('T')[0];
+}
+
+function SessionForm({
+  initialValues,
+  onSubmit,
+  onCancel,
+  submitLabel,
+  submitClass,
+}: {
+  initialValues: {
+    date: string;
+    type: SessionType;
+    courts: number;
+    rounds: number;
+    mixedRounds: number;
+    votingDeadline: string | null;
+    trackLate: boolean;
+  };
+  onSubmit: (values: {
+    date: string;
+    type: SessionType;
+    courts: number;
+    rounds: number;
+    mixedRounds: number;
+    votingDeadline: string | null;
+    trackLate: boolean;
+  }) => Promise<void>;
+  onCancel: () => void;
+  submitLabel: string;
+  submitClass: string;
+}) {
+  const [date, setDate] = useState(initialValues.date);
+  const [type, setType] = useState<SessionType>(initialValues.type);
+  const [courts, setCourts] = useState(initialValues.courts);
+  const [rounds, setRounds] = useState(initialValues.rounds);
+  const [mixedRounds, setMixedRounds] = useState(initialValues.mixedRounds);
+  const [trackLate, setTrackLate] = useState(initialValues.trackLate);
+  const [useDeadline, setUseDeadline] = useState(initialValues.votingDeadline !== null);
+  const [deadlineDate, setDeadlineDate] = useState(() => {
+    if (initialValues.votingDeadline) return initialValues.votingDeadline.split('T')[0];
+    return getDefaultDeadlineDate(initialValues.date);
+  });
+  const [deadlineTime, setDeadlineTime] = useState(() => {
+    if (initialValues.votingDeadline) {
+      const d = new Date(initialValues.votingDeadline);
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+    return '23:59';
+  });
   const [loading, setLoading] = useState(false);
+
+  // 경기 날짜 변경 시 기본 마감일도 같이 이동 (사용자가 마감일을 수동 변경하지 않은 경우)
+  const handleDateChange = (newDate: string) => {
+    setDate(newDate);
+    setDeadlineDate(getDefaultDeadlineDate(newDate));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const votingDeadline = getVotingDeadline(date, deadlineDay);
-    if (!currentClub) return;
-    await addSession({
-      clubId: currentClub.id,
+    const votingDeadline = useDeadline
+      ? new Date(`${deadlineDate}T${deadlineTime}:00`).toISOString()
+      : null;
+    await onSubmit({
       date,
       type,
       courts,
       rounds,
       mixedRounds: type === 'quarterly' ? 0 : mixedRounds,
       votingDeadline,
-      isGenerated: false,
-      isConfirmed: false,
       trackLate,
     });
     setLoading(false);
-    onSave();
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">경기 날짜 (일요일)</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">경기 날짜</label>
           <input
             type="date"
             value={date}
-            onChange={e => setDate(e.target.value)}
+            onChange={e => handleDateChange(e.target.value)}
             required
             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
@@ -95,18 +142,44 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
             </div>
           </div>
         )}
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">투표 마감</label>
-          <select
-            value={deadlineDay}
-            onChange={e => setDeadlineDay(e.target.value as 'friday' | 'saturday')}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            <option value="friday">금요일 23:59</option>
-            <option value="saturday">토요일 23:59</option>
-          </select>
-        </div>
       </div>
+
+      {/* 투표 마감 설정 */}
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={useDeadline}
+            onChange={e => setUseDeadline(e.target.checked)}
+            className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+          />
+          <span className="text-sm font-medium text-slate-700">투표 마감 설정</span>
+        </label>
+        {useDeadline && (
+          <div className="flex gap-2 ml-6">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-500 mb-1">마감 날짜</label>
+              <input
+                type="date"
+                value={deadlineDate}
+                onChange={e => setDeadlineDate(e.target.value)}
+                required={useDeadline}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">마감 시간</label>
+              <input
+                type="time"
+                value={deadlineTime}
+                onChange={e => setDeadlineTime(e.target.value)}
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="pt-1">
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input
@@ -122,127 +195,70 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">
           취소
         </button>
-        <button type="submit" disabled={loading} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
-          {loading ? '저장 중...' : '저장'}
+        <button type="submit" disabled={loading} className={`px-4 py-2 text-white text-sm rounded-lg disabled:opacity-50 transition-colors ${submitClass}`}>
+          {loading ? '저장 중...' : submitLabel}
         </button>
       </div>
     </form>
   );
 }
 
-function EditSessionForm({ session, onSave, onCancel }: { session: Session; onSave: () => void; onCancel: () => void }) {
-  const [date, setDate] = useState(session.date);
-  const [type, setType] = useState<SessionType>(session.type);
-  const [courts, setCourts] = useState(session.courts);
-  const [rounds, setRounds] = useState(session.rounds);
-  const [mixedRounds, setMixedRounds] = useState(session.mixedRounds);
-  const [deadlineDay, setDeadlineDay] = useState<'friday' | 'saturday'>(
-    new Date(session.votingDeadline).getDay() === 5 ? 'friday' : 'saturday'
-  );
-  const [trackLate, setTrackLate] = useState(session.trackLate);
-  const [loading, setLoading] = useState(false);
+function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => void; onCancel: () => void; defaultCourts: number }) {
+  const { currentClub } = useClub();
+  const nextSunday = getNextSunday();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const votingDeadline = getVotingDeadline(date, deadlineDay);
-    await updateSession(session.id, {
-      date,
-      type,
-      courts,
-      rounds,
-      mixedRounds: type === 'quarterly' ? 0 : mixedRounds,
-      votingDeadline,
-      trackLate,
+  const handleSubmit = async (values: Parameters<React.ComponentProps<typeof SessionForm>['onSubmit']>[0]) => {
+    if (!currentClub) return;
+    await addSession({
+      clubId: currentClub.id,
+      ...values,
+      isGenerated: false,
+      isConfirmed: false,
     });
-    setLoading(false);
     onSave();
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">경기 날짜</label>
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            required
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">경기 종류</label>
-          <select
-            value={type}
-            onChange={e => setType(e.target.value as SessionType)}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            <option value="weekly">주간 경기</option>
-            <option value="quarterly">분기대회</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">코트 수</label>
-          <select
-            value={courts}
-            onChange={e => setCourts(parseInt(e.target.value))}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n}개</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">총 라운드 수</label>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setRounds(Math.max(1, rounds - 1))} className="w-8 h-8 rounded-lg border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-100">-</button>
-            <span className="flex-1 text-center font-medium">{rounds}</span>
-            <button type="button" onClick={() => setRounds(rounds + 1)} className="w-8 h-8 rounded-lg border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-100">+</button>
-          </div>
-        </div>
-        {type === 'weekly' && (
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">혼복 라운드 수</label>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setMixedRounds(Math.max(0, mixedRounds - 1))} className="w-8 h-8 rounded-lg border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-100">-</button>
-              <span className="flex-1 text-center font-medium">{mixedRounds}</span>
-              <button type="button" onClick={() => setMixedRounds(Math.min(rounds, mixedRounds + 1))} className="w-8 h-8 rounded-lg border border-slate-300 flex items-center justify-center text-slate-600 hover:bg-slate-100">+</button>
-            </div>
-          </div>
-        )}
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">투표 마감</label>
-          <select
-            value={deadlineDay}
-            onChange={e => setDeadlineDay(e.target.value as 'friday' | 'saturday')}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-          >
-            <option value="friday">금요일 23:59</option>
-            <option value="saturday">토요일 23:59</option>
-          </select>
-        </div>
-      </div>
-      <div className="pt-1">
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={trackLate}
-            onChange={e => setTrackLate(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
-          />
-          <span className="text-sm text-slate-700">지각여부 수집</span>
-        </label>
-      </div>
-      <div className="flex gap-2 justify-end">
-        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">
-          취소
-        </button>
-        <button type="submit" disabled={loading} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-          {loading ? '저장 중...' : '수정 저장'}
-        </button>
-      </div>
-    </form>
+    <SessionForm
+      initialValues={{
+        date: nextSunday,
+        type: 'weekly',
+        courts: defaultCourts,
+        rounds: 6,
+        mixedRounds: 2,
+        votingDeadline: new Date(`${getDefaultDeadlineDate(nextSunday)}T23:59:00`).toISOString(),
+        trackLate: false,
+      }}
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
+      submitLabel="저장"
+      submitClass="bg-green-600 hover:bg-green-700"
+    />
+  );
+}
+
+function EditSessionForm({ session, onSave, onCancel }: { session: Session; onSave: () => void; onCancel: () => void }) {
+  const handleSubmit = async (values: Parameters<React.ComponentProps<typeof SessionForm>['onSubmit']>[0]) => {
+    await updateSession(session.id, values);
+    onSave();
+  };
+
+  return (
+    <SessionForm
+      initialValues={{
+        date: session.date,
+        type: session.type,
+        courts: session.courts,
+        rounds: session.rounds,
+        mixedRounds: session.mixedRounds,
+        votingDeadline: session.votingDeadline,
+        trackLate: session.trackLate,
+      }}
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
+      submitLabel="수정 저장"
+      submitClass="bg-blue-600 hover:bg-blue-700"
+    />
   );
 }
 
@@ -337,7 +353,7 @@ export default function SessionsPage() {
 
 function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session; onDelete: (id: string, date: string) => void; onSaved: () => void; isAdmin: boolean }) {
   const isPast = session.date < new Date().toISOString().split('T')[0];
-  const isVotingClosed = new Date() > new Date(session.votingDeadline);
+  const isVotingClosed = session.votingDeadline ? new Date() > new Date(session.votingDeadline) : false;
   const [editing, setEditing] = useState(false);
 
   return (
@@ -358,8 +374,10 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
           <p className="text-slate-500 text-sm">
             {session.courts}코트 · {session.rounds}라운드
             {session.type === 'weekly' && session.mixedRounds > 0 ? ` · 혼복 ${session.mixedRounds}R` : ''}
-            {' · 투표 마감: '}{new Date(session.votingDeadline).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short' })}
-            {isVotingClosed && !isPast && <span className="ml-1 text-orange-500">(마감)</span>}
+            {session.votingDeadline
+              ? <>{' · 투표 마감: '}{new Date(session.votingDeadline).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short' })}{isVotingClosed && !isPast && <span className="ml-1 text-orange-500">(마감)</span>}</>
+              : <span className="ml-1 text-green-600"> · 투표 마감 없음</span>
+            }
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -135,7 +135,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     courts: row.courts as number,
     rounds: row.rounds as number,
     mixedRounds: row.mixed_rounds as number,
-    votingDeadline: row.voting_deadline as string,
+    votingDeadline: (row.voting_deadline as string | null) ?? null,
     isGenerated: row.is_generated as boolean,
     isConfirmed: row.is_confirmed as boolean,
     trackLate: (row.track_late as boolean) ?? false,
@@ -177,7 +177,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
       courts: data.courts,
       rounds: data.rounds,
       mixed_rounds: data.mixedRounds,
-      voting_deadline: data.votingDeadline,
+      voting_deadline: data.votingDeadline ?? null,
       is_generated: data.isGenerated,
       is_confirmed: data.isConfirmed,
       track_late: data.trackLate ?? false,
@@ -195,7 +195,7 @@ export async function updateSession(id: string, data: Partial<Omit<Session, 'id'
   if (data.courts !== undefined) update.courts = data.courts;
   if (data.rounds !== undefined) update.rounds = data.rounds;
   if (data.mixedRounds !== undefined) update.mixed_rounds = data.mixedRounds;
-  if (data.votingDeadline !== undefined) update.voting_deadline = data.votingDeadline;
+  if (data.votingDeadline !== undefined) update.voting_deadline = data.votingDeadline ?? null;
   if (data.isGenerated !== undefined) update.is_generated = data.isGenerated;
   if (data.isConfirmed !== undefined) update.is_confirmed = data.isConfirmed;
   if (data.trackLate !== undefined) update.track_late = data.trackLate;

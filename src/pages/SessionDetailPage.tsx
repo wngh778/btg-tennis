@@ -534,12 +534,16 @@ export default function SessionDetailPage() {
               {session.type === 'weekly' && session.mixedRounds > 0 ? ` · 혼복 ${session.mixedRounds}R` : ''}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              투표 마감: {new Date(session.votingDeadline).toLocaleDateString('ko-KR', {
-                month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit'
-              })}
-              {votingOpen
-                ? <span className="ml-1 text-green-500 font-medium">· 투표 진행 중</span>
-                : <span className="ml-1 text-orange-500 font-medium">· 투표 마감</span>
+              {session.votingDeadline
+                ? <>투표 마감: {new Date(session.votingDeadline).toLocaleDateString('ko-KR', {
+                    month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit'
+                  })}
+                  {votingOpen
+                    ? <span className="ml-1 text-green-500 font-medium">· 투표 진행 중</span>
+                    : <span className="ml-1 text-orange-500 font-medium">· 투표 마감</span>
+                  }
+                </>
+                : <span className="text-green-500 font-medium">투표 마감 없음 · 항상 참여 가능</span>
               }
             </p>
           </div>

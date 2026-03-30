@@ -343,7 +343,8 @@ export function getVotingDeadline(sessionDate: string, deadlineDay: 'friday' | '
   return date.toISOString();
 }
 
-export function isVotingOpen(deadline: string): boolean {
+export function isVotingOpen(deadline: string | null): boolean {
+  if (deadline === null) return true; // 마감 없음 = 항상 열림
   return new Date() < new Date(deadline);
 }
 

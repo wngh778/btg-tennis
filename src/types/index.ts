@@ -37,7 +37,7 @@ export interface Session {
   courts: number; // default 4
   rounds: number; // default 6
   mixedRounds: number; // 혼복 라운드 수 (weekly only)
-  votingDeadline: string; // ISO date string
+  votingDeadline: string | null; // ISO date string, null = 마감 없음
   isGenerated: boolean;
   isConfirmed: boolean;
   trackLate: boolean; // 지각여부 추적 여부
