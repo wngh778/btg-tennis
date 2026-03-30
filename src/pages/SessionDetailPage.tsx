@@ -8,7 +8,7 @@ import {
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { generateMatches, generateGroupMatches, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
+import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 
 function formatDate(dateStr: string) {
@@ -1165,28 +1165,50 @@ export default function SessionDetailPage() {
               )}
             </div>
             {session.gameMode === 'group' && groups.length > 0 && (
-              <div className="px-6 pb-2">
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 생성 조</label>
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={() => setGenerateTargetGroup('all')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      generateTargetGroup === 'all' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    전체 조
-                  </button>
-                  {groups.map(g => (
+              <div className="px-6 pb-2 space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 생성 조</label>
+                  <div className="flex gap-2 flex-wrap">
                     <button
-                      key={g.id}
-                      onClick={() => setGenerateTargetGroup(g.id)}
+                      onClick={() => setGenerateTargetGroup('all')}
                       className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        generateTargetGroup === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        generateTargetGroup === 'all' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {g.name}
+                      전체 조
                     </button>
-                  ))}
+                    {groups.map(g => (
+                      <button
+                        key={g.id}
+                        onClick={() => setGenerateTargetGroup(g.id)}
+                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          generateTargetGroup === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {g.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 조별 예상 라운드 안내 */}
+                <div className="bg-purple-50 rounded-xl p-3 space-y-1">
+                  {(generateTargetGroup === 'all' ? groups : groups.filter(g => g.id === generateTargetGroup)).map(g => {
+                    const groupPlayers = attendingPlayers.filter(p => g.memberIds.includes(p.id));
+                    const opt = calcOptimalGroupRounds(groupPlayers.length, generateCourts, generateRounds);
+                    const gamesPerPlayer = groupPlayers.length > 0 && opt > 0
+                      ? Math.floor(opt * Math.min(generateCourts, Math.floor(groupPlayers.length / 4)) * 4 / groupPlayers.length)
+                      : 0;
+                    return (
+                      <div key={g.id} className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-purple-700">{g.name}</span>
+                        <span className="text-purple-600">
+                          {groupPlayers.length < 4
+                            ? '인원 부족 (4명 이상 필요)'
+                            : `${groupPlayers.length}명 · ${opt}라운드 · 인당 ${gamesPerPlayer}게임`}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

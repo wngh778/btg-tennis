@@ -350,9 +350,32 @@ export function isVotingOpen(deadline: string | null): boolean {
 
 export const NTRP_OPTIONS = [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
 
-// 조별경기 대진 생성 - NTRP 고려 없음, 인원당 경기횟수 균등
+// 최대공약수
+function gcd(a: number, b: number): number {
+  while (b > 0) { [a, b] = [b, a % b]; }
+  return a;
+}
+
+/**
+ * 조별경기에서 모든 인원이 같은 게임수를 갖는 최적 라운드 수를 계산.
+ * maxRounds 이하에서 "인원당 게임수"가 정수가 되는 최대 라운드 반환.
+ * 불가능하면(step > maxRounds) maxRounds 그대로 반환 (최대한 같게).
+ */
+export function calcOptimalGroupRounds(playerCount: number, courts: number, maxRounds: number): number {
+  const activeCourts = Math.min(courts, Math.floor(playerCount / 4));
+  if (activeCourts === 0 || playerCount < 4) return 0;
+  const playing = activeCourts * 4;
+  if (playing >= playerCount) return maxRounds; // 전원 매 라운드 출전 → 어떤 라운드수든 동일
+  const step = playerCount / gcd(playerCount, playing); // 균등해지는 최소 라운드 단위
+  const opt = Math.floor(maxRounds / step) * step;
+  return opt > 0 ? opt : maxRounds; // step > maxRounds이면 best-effort
+}
+
+// 조별경기 페어 스코어 - 중복 페어 패널티를 매우 크게 설정
+const REPEAT_PARTNER_PENALTY = 10000;
+
 function groupPairScore(history: PlayerHistory, p1: Player, p2: Player): number {
-  return getPartnerCount(history, p1.id, p2.id) * 3;
+  return getPartnerCount(history, p1.id, p2.id) * REPEAT_PARTNER_PENALTY;
 }
 
 function groupMatchScore(history: PlayerHistory, team1: Team, team2: Team): number {
@@ -379,16 +402,21 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
   const { sessionId, groupId, players, courts, totalRounds } = options;
   if (players.length < 4) return [];
 
+  // 1) 최적 라운드 수 자동 계산 (균등 게임수 보장)
+  const optimalRounds = calcOptimalGroupRounds(players.length, courts, totalRounds);
+  const actualRounds = optimalRounds > 0 ? optimalRounds : totalRounds;
+
   const history: PlayerHistory = new Map();
   const gameCounts = new Map<string, number>();
   players.forEach(p => gameCounts.set(p.id, 0));
 
   const allMatches: Omit<Match, 'id'>[] = [];
 
-  for (let round = 1; round <= totalRounds; round++) {
+  for (let round = 1; round <= actualRounds; round++) {
     const activeCourts = Math.min(courts, Math.floor(players.length / 4));
     if (activeCourts === 0) continue;
 
+    // 게임수 적은 순 → 이번 라운드 출전자 선정
     const sorted = [...players].sort((a, b) => {
       const diff = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
       return diff !== 0 ? diff : Math.random() - 0.5;
@@ -398,7 +426,8 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
     let bestScore = Infinity;
     let bestMatches: Array<{ team1: Team; team2: Team }> = [];
 
-    for (let attempt = 0; attempt < 300; attempt++) {
+    // 2) 충분한 시도로 중복 페어 최소화
+    for (let attempt = 0; attempt < 500; attempt++) {
       const shuffled = shuffle(playing);
       const roundMatches: Array<{ team1: Team; team2: Team }> = [];
       let totalScore = 0;
@@ -413,6 +442,8 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
         bestScore = totalScore;
         bestMatches = roundMatches;
       }
+      // 중복 페어 없는 완벽한 조합 찾으면 조기 종료
+      if (bestScore < REPEAT_PARTNER_PENALTY) break;
     }
 
     updateHistory(history, bestMatches);
@@ -424,7 +455,7 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
         groupId,
         round,
         court: i + 1,
-        matchType: 'male' as const, // 조별경기는 matchType 구분 없이 male로 통일 (UI에서 "복식"으로 표시)
+        matchType: 'male' as const,
         team1: m.team1,
         team2: m.team2,
         isCompleted: false,
