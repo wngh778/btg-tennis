@@ -2077,7 +2077,7 @@ function GroupResultTab({
 }
 
 function GroupsTab({
-  groups, session, members: _members, attendingPlayers, onGroupsChanged, isAdmin: _isAdmin
+  groups, session, members, attendingPlayers, onGroupsChanged, isAdmin: _isAdmin
 }: {
   groups: SessionGroup[];
   session: { id: string };
@@ -2090,7 +2090,11 @@ function GroupsTab({
   const [editName, setEditName] = useState('');
 
   const assignedIds = new Set(groups.flatMap(g => g.memberIds));
-  const unassigned = attendingPlayers.filter(p => !assignedIds.has(p.id));
+  // 참석 투표한 인원이 있으면 그 인원 기준, 없으면 전체 활성 멤버 기준
+  const candidatePlayers: Player[] = attendingPlayers.length > 0
+    ? attendingPlayers
+    : members.filter(m => m.isActive).map(m => ({ id: m.id, name: m.name, gender: m.gender, ntrp: m.ntrp, type: 'member' as const }));
+  const unassigned = candidatePlayers.filter(p => !assignedIds.has(p.id));
 
   const handleAddToGroup = async (groupId: string, playerId: string) => {
     // 다른 그룹에서 제거
@@ -2163,7 +2167,7 @@ function GroupsTab({
       {/* 각 조 카드 */}
       {groups.map(group => {
         const groupPlayers = group.memberIds
-          .map(id => attendingPlayers.find(p => p.id === id))
+          .map(id => candidatePlayers.find(p => p.id === id))
           .filter(Boolean) as Player[];
         return (
           <div key={group.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
