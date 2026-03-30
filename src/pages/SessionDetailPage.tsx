@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
   setAttendance, deleteAttendance, addGuest, deleteGuest,
-  getMatches, saveMatches, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
+  getMatches, saveMatches, insertMatch, deleteMatch, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
@@ -19,11 +19,12 @@ const matchTypeLabel = { male: '남복', female: '여복', mixed: '혼복' };
 const matchTypeBg = { male: 'bg-blue-50 border-blue-200', female: 'bg-pink-50 border-pink-200', mixed: 'bg-purple-50 border-purple-200' };
 const matchTypeBadge = { male: 'bg-blue-100 text-blue-700', female: 'bg-pink-100 text-pink-700', mixed: 'bg-purple-100 text-purple-700' };
 
-type SelectedPlayer = {
+type SubstituteTarget = {
   matchId: string;
   team: 'team1' | 'team2';
   slot: 'player1' | 'player2';
   player: Player;
+  round: number;
 } | null;
 
 export default function SessionDetailPage() {
@@ -43,10 +44,13 @@ export default function SessionDetailPage() {
   // Bracket editing
   const [editMode, setEditMode] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
-  const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayer>(null);
+  const [pendingRoundsCount, setPendingRoundsCount] = useState(0);
+  const [substituteTarget, setSubstituteTarget] = useState<SubstituteTarget>(null);
   const [saving, setSaving] = useState(false);
   const [dragMatchId, setDragMatchId] = useState<string | null>(null);
   const [dragOverMatchId, setDragOverMatchId] = useState<string | null>(null);
+  const [dragOverEmptyRound, setDragOverEmptyRound] = useState<number | null>(null);
+  const [deletedMatchIds, setDeletedMatchIds] = useState<Set<string>>(new Set());
 
   // Generate settings modal
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -56,7 +60,9 @@ export default function SessionDetailPage() {
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
-  const [mondayFirstPlayer, setMondayFirstPlayer] = useState('');
+  const [mondayR1Selection, setMondayR1Selection] = useState<string[]>([]);
+  const [mondayCompanion, setMondayCompanion] = useState('');
+  const [mondayRounds, setMondayRounds] = useState(5);
 
   // Guest form
   const [showGuestForm, setShowGuestForm] = useState(false);
@@ -115,6 +121,23 @@ export default function SessionDetailPage() {
       gender: member.gender,
       ntrp: member.ntrp,
       attending,
+    });
+    load();
+  };
+
+  const handleMemberLate = async (member: Member, isLate: boolean) => {
+    if (!canVote) return;
+    const rec = attendance.find(a => a.playerId === member.id);
+    if (!rec || !rec.attending) return;
+    await setAttendance({
+      sessionId: session.id,
+      playerId: member.id,
+      playerType: 'member',
+      playerName: member.name,
+      gender: member.gender,
+      ntrp: member.ntrp,
+      attending: true,
+      isLate,
     });
     load();
   };
@@ -187,21 +210,37 @@ export default function SessionDetailPage() {
 
   // --- Bracket Editing ---
   const handleEditModeStart = () => {
-    setPendingMatches(JSON.parse(JSON.stringify(matches)));
-    setSelectedPlayer(null);
+    const copied: Match[] = JSON.parse(JSON.stringify(matches));
+    setPendingMatches(copied);
+    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : session.rounds;
+    setPendingRoundsCount(Math.max(session.rounds, maxRound));
+    setSubstituteTarget(null);
+    setDeletedMatchIds(new Set());
     setEditMode(true);
   };
 
   const handleEditCancel = () => {
     setEditMode(false);
     setPendingMatches([]);
-    setSelectedPlayer(null);
+    setPendingRoundsCount(0);
+    setSubstituteTarget(null);
+    setDeletedMatchIds(new Set());
+  };
+
+  const handleRoundCountChange = (delta: number) => {
+    const newCount = pendingRoundsCount + delta;
+    if (newCount < 1) return;
+    if (delta < 0) {
+      setPendingMatches(prev => prev.filter(m => m.round <= newCount));
+    }
+    setPendingRoundsCount(newCount);
   };
 
   const handleEditSave = async () => {
     setSaving(true);
     try {
       for (const pm of pendingMatches) {
+        if (pm.id.startsWith('temp_')) continue;
         const original = matches.find(m => m.id === pm.id);
         if (!original) continue;
         const changed =
@@ -213,13 +252,99 @@ export default function SessionDetailPage() {
           await updateMatch(pm.id, { team1: pm.team1, team2: pm.team2, round: pm.round, court: pm.court });
         }
       }
+      for (const nm of pendingMatches.filter(m => m.id.startsWith('temp_'))) {
+        const { id: _id, ...matchData } = nm;
+        await insertMatch(matchData);
+      }
+      for (const id of deletedMatchIds) {
+        await deleteMatch(id);
+      }
+      if (pendingRoundsCount !== session.rounds) {
+        await updateSession(session.id, { rounds: pendingRoundsCount });
+      }
       setEditMode(false);
       setPendingMatches([]);
-      setSelectedPlayer(null);
+      setPendingRoundsCount(0);
+      setSubstituteTarget(null);
+      setDeletedMatchIds(new Set());
       load();
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAutoFillRound = (round: number) => {
+    const gameCounts = new Map<string, number>();
+    attendingPlayers.forEach(p => gameCounts.set(p.id, 0));
+    for (const m of pendingMatches) {
+      for (const p of [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]) {
+        gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1);
+      }
+    }
+    const sorted = [...attendingPlayers].sort((a, b) => {
+      const diff = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
+      return diff !== 0 ? diff : b.ntrp - a.ntrp;
+    });
+    const courts = session!.courts;
+    const newMatches: Match[] = [];
+    const usedIds = new Set<string>();
+    for (let c = 1; c <= courts; c++) {
+      const avail = sorted.filter(p => !usedIds.has(p.id));
+      if (avail.length < 4) break;
+      const [p1, p2, p3, p4] = avail;
+      const genders = [p1, p2, p3, p4].map(p => p.gender);
+      const matchType = genders.every(g => g === 'male') ? 'male' as const
+        : genders.every(g => g === 'female') ? 'female' as const
+        : 'mixed' as const;
+      newMatches.push({
+        id: `temp_${Date.now()}_${c}`,
+        sessionId: session!.id,
+        round,
+        court: c,
+        matchType,
+        team1: { player1: p1, player2: p2 },
+        team2: { player1: p3, player2: p4 },
+        isCompleted: false,
+      });
+      [p1, p2, p3, p4].forEach(p => usedIds.add(p.id));
+    }
+    if (newMatches.length === 0) { alert('배정할 인원이 부족합니다.'); return; }
+    setPendingMatches(prev => [...prev, ...newMatches]);
+  };
+
+  const handleDeleteMatch = (matchId: string) => {
+    setPendingMatches(prev => prev.filter(m => m.id !== matchId));
+    if (!matchId.startsWith('temp_')) {
+      setDeletedMatchIds(prev => new Set([...prev, matchId]));
+    }
+  };
+
+  const handleDeleteRound = (round: number) => {
+    const toDelete = pendingMatches.filter(m => m.round === round);
+    toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m =>
+      setDeletedMatchIds(prev => new Set([...prev, m.id]))
+    );
+    // 삭제 후 그 위 라운드들을 한 칸씩 앞으로 당김
+    setPendingMatches(prev =>
+      prev
+        .filter(m => m.round !== round)
+        .map(m => m.round > round ? { ...m, round: m.round - 1 } : m)
+    );
+    setPendingRoundsCount(prev => Math.max(1, prev - 1));
+  };
+
+  const handleDragToEmptyRound = (targetRound: number) => {
+    if (!dragMatchId) return;
+    const newPending = pendingMatches.map(m => ({ ...m }));
+    const match = newPending.find(m => m.id === dragMatchId);
+    if (!match) return;
+    const matchesInTargetRound = newPending.filter(m => m.round === targetRound && m.id !== dragMatchId);
+    match.round = targetRound;
+    match.court = matchesInTargetRound.length + 1;
+    setPendingMatches(newPending);
+    setDragMatchId(null);
+    setDragOverMatchId(null);
+    setDragOverEmptyRound(null);
   };
 
   const handleMondayClick = () => {
@@ -228,24 +353,29 @@ export default function SessionDetailPage() {
       alert(`참석 남성이 ${malePlayers.length}명입니다. 이 기능은 정확히 6명일 때 사용할 수 있습니다.`);
       return;
     }
-    setMondayFirstPlayer(malePlayers.find(p => p.name === '염주호')?.name ?? malePlayers[0].name);
+    setMondayR1Selection([]);
+    setMondayCompanion('');
+    setMondayRounds(session.rounds >= 6 ? 6 : 5);
     setShowMondayModal(true);
   };
 
   const handleMondayGenerate = async () => {
     const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
-    const Y = malePlayers.find(p => p.name === mondayFirstPlayer);
-    if (!Y) return;
-    setShowMondayModal(false);
+    const Y = malePlayers.find(p => p.name === '염주호');
+    if (!Y) { alert('염주호 선수를 찾을 수 없습니다.'); return; }
+    if (mondayR1Selection.length !== 3) { alert('첫 경기 선수를 3명 선택하세요.'); return; }
+    if (!mondayCompanion) { alert('염주호의 파트너를 선택하세요.'); return; }
 
-    const sorted = [...malePlayers].sort((a, b) => b.ntrp - a.ntrp);
-    const firstIdx = sorted.findIndex(p => p.name === mondayFirstPlayer);
-    const partnerIdx = 5 - firstIdx;
-    const P1 = sorted[partnerIdx];
-    const others = sorted.filter((_, i) => i !== firstIdx && i !== partnerIdx);
-    const [B1, B2, B3, B4] = others;
-    const pairB: [Player, Player] = [B1, B4];
-    const pairC: [Player, Player] = [B2, B3];
+    const companion = malePlayers.find(p => p.id === mondayCompanion)!;
+    const groupB = mondayR1Selection
+      .filter(id => id !== mondayCompanion)
+      .map(id => malePlayers.find(p => p.id === id)!);
+    const groupC = malePlayers.filter(p => p.id !== Y.id && !mondayR1Selection.includes(p.id));
+
+    const [B1, B2] = groupB;
+    const [C1, C2] = groupC;
+
+    setShowMondayModal(false);
 
     const mk = (round: number, t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player): Omit<Match, 'id'> => ({
       sessionId: session!.id,
@@ -259,16 +389,21 @@ export default function SessionDetailPage() {
       isCompleted: false,
     });
 
+    // 5라운드: A(Y+companion): R1,R2,skip R3,R4,R5 | B: R1,skip R2,R3,R4,skip R5 | C: skip R1,R2,R3,skip R4,R5
+    // 6라운드: A: R1,R2,skip R3,R4,R5,skip R6 | B: R1,skip R2,R3,R4,skip R5,R6 | C: skip R1,R2,R3,skip R4,R5,R6
     const generated: Omit<Match, 'id'>[] = [
-      mk(1, Y, pairB[0], P1, pairB[1]),
-      mk(2, Y, pairC[0], P1, pairC[1]),
-      mk(3, pairB[0], pairC[0], pairB[1], pairC[1]),
-      mk(4, Y, pairB[1], P1, pairB[0]),
-      mk(5, Y, pairC[1], P1, pairC[0]),
+      mk(1, Y, companion, B1, B2),     // A vs B
+      mk(2, Y, companion, C1, C2),     // A vs C
+      mk(3, B1, C1, B2, C2),           // B vs C
+      mk(4, Y, B1, companion, B2),     // A+B mix
+      mk(5, Y, C1, companion, C2),     // A+C mix
     ];
+    if (mondayRounds >= 6) {
+      generated.push(mk(6, B1, C2, B2, C1)); // B vs C (다른 팀 조합)
+    }
 
     await saveMatches(session!.id, generated);
-    await updateSession(session!.id, { isGenerated: true, courts: 1, rounds: 5, mixedRounds: 0 });
+    await updateSession(session!.id, { isGenerated: true, courts: 1, rounds: mondayRounds, mixedRounds: 0 });
     load();
     setTab('bracket');
   };
@@ -295,35 +430,30 @@ export default function SessionDetailPage() {
     slot: 'player1' | 'player2',
     player: Player
   ) => {
-    if (!selectedPlayer) {
-      // Select this player
-      setSelectedPlayer({ matchId, team, slot, player });
-    } else {
-      // Swap the two players
-      if (selectedPlayer.matchId === matchId && selectedPlayer.team === team && selectedPlayer.slot === slot) {
-        // Deselect if clicking the same player
-        setSelectedPlayer(null);
-        return;
-      }
-      const newPending = pendingMatches.map(m => {
-        const updated = { ...m, team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } }, team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } } };
-        return updated;
-      });
-
-      // Find and swap
-      const matchA = newPending.find(m => m.id === selectedPlayer.matchId);
-      const matchB = newPending.find(m => m.id === matchId);
-
-      if (matchA && matchB) {
-        const playerA = matchA[selectedPlayer.team][selectedPlayer.slot];
-        const playerB = matchB[team][slot];
-        matchA[selectedPlayer.team][selectedPlayer.slot] = playerB;
-        matchB[team][slot] = playerA;
-      }
-
-      setPendingMatches(newPending);
-      setSelectedPlayer(null);
+    const match = pendingMatches.find(m => m.id === matchId);
+    if (!match) return;
+    // 같은 선수 클릭 시 팝업 닫기
+    if (substituteTarget?.matchId === matchId && substituteTarget?.slot === slot && substituteTarget?.team === team) {
+      setSubstituteTarget(null);
+      return;
     }
+    setSubstituteTarget({ matchId, team, slot, player, round: match.round });
+  };
+
+  const handleSubstitute = (restingPlayer: Player) => {
+    if (!substituteTarget) return;
+    const newPending = pendingMatches.map(m => {
+      if (m.id !== substituteTarget.matchId) return m;
+      const updated = {
+        ...m,
+        team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
+        team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
+      };
+      updated[substituteTarget.team][substituteTarget.slot] = restingPlayer;
+      return updated;
+    });
+    setPendingMatches(newPending);
+    setSubstituteTarget(null);
   };
 
 
@@ -333,7 +463,9 @@ export default function SessionDetailPage() {
 
   // 본인 계정에 연결된 멤버 (username === member.name)
   const myMember = appUser ? activeMembers.find(m => m.name === appUser.username) ?? null : null;
-  const myAttendance = myMember ? attendance.find(a => a.playerId === myMember.id)?.attending ?? null : null;
+  const myAttendanceRec = myMember ? attendance.find(a => a.playerId === myMember.id) ?? null : null;
+  const myAttendance = myAttendanceRec?.attending ?? null;
+  const myIsLate = myAttendanceRec?.isLate;
 
   // 관리자: 모든 멤버 투표 가능 / 일반 유저: 본인만 가능
   const canVoteForMember = (memberId: string) => {
@@ -341,6 +473,43 @@ export default function SessionDetailPage() {
     if (isAdminUser) return true;
     return myMember?.id === memberId;
   };
+
+  // 대진표와 참석 인원 불일치 감지
+  const bracketPlayerIds = new Set(
+    matches.flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
+  );
+  const attendingIdSet = new Set(attendingPlayers.map(p => p.id));
+  const removedFromBracket = session.isGenerated && !session.isConfirmed
+    ? matches.flatMap(m => [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2])
+        .filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i && !attendingIdSet.has(p.id))
+    : [];
+  const addedToBracket = session.isGenerated && !session.isConfirmed
+    ? attendingPlayers.filter(p => !bracketPlayerIds.has(p.id))
+    : [];
+
+  const handleSyncBracket = async () => {
+    if (removedFromBracket.length > 0) {
+      const removedSet = new Set(removedFromBracket.map(p => p.id));
+      const toDelete = matches.filter(m =>
+        removedSet.has(m.team1.player1.id) || removedSet.has(m.team1.player2.id) ||
+        removedSet.has(m.team2.player1.id) || removedSet.has(m.team2.player2.id)
+      );
+      for (const m of toDelete) await deleteMatch(m.id);
+    }
+    load();
+  };
+
+  // 선수별 경기 번호 계산 (몇 번째 경기인지)
+  const displaySource = editMode ? pendingMatches : matches;
+  const matchGameNumbers = new Map<string, number>(); // `${matchId}_${playerId}` → N번째
+  const cumGameCount = new Map<string, number>();
+  for (const m of [...displaySource].sort((a, b) => a.round - b.round || a.court - b.court)) {
+    for (const p of [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]) {
+      const n = (cumGameCount.get(p.id) || 0) + 1;
+      cumGameCount.set(p.id, n);
+      matchGameNumbers.set(`${m.id}_${p.id}`, n);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -471,6 +640,37 @@ export default function SessionDetailPage() {
                   </button>
                 </div>
               </div>
+              {session.trackLate && myAttendance === true && (
+                <div className="mt-3 pt-3 border-t border-slate-200 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 mr-1">지각여부</span>
+                  <button
+                    onClick={() => canVote && handleMemberLate(myMember, false)}
+                    disabled={!canVote}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      myIsLate === false
+                        ? 'bg-green-500 text-white'
+                        : canVote
+                        ? 'bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700'
+                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    정시참여
+                  </button>
+                  <button
+                    onClick={() => canVote && handleMemberLate(myMember, true)}
+                    disabled={!canVote}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      myIsLate === true
+                        ? 'bg-orange-400 text-white'
+                        : canVote
+                        ? 'bg-slate-100 text-slate-600 hover:bg-orange-100 hover:text-orange-600'
+                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    지각
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -501,7 +701,7 @@ export default function SessionDetailPage() {
                       {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                       {isAdminUser && <span className="text-xs font-mono text-slate-400">{m.ntrp.toFixed(1)}</span>}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                       <button
                         onClick={() => canVoteThis && handleMemberVote(m, true)}
                         disabled={!canVoteThis}
@@ -528,6 +728,30 @@ export default function SessionDetailPage() {
                       >
                         불참
                       </button>
+                      {session.trackLate && attending === true && (
+                        canVoteThis ? (
+                          <button
+                            onClick={() => handleMemberLate(m, !(rec?.isLate ?? false))}
+                            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                              rec?.isLate
+                                ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
+                                : 'bg-green-50 text-green-600 hover:bg-green-100'
+                            }`}
+                          >
+                            {rec?.isLate ? '지각' : '정시'}
+                          </button>
+                        ) : (
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            rec?.isLate
+                              ? 'bg-orange-100 text-orange-600'
+                              : rec?.isLate === false
+                              ? 'bg-green-50 text-green-600'
+                              : 'bg-slate-100 text-slate-400'
+                          }`}>
+                            {rec?.isLate ? '지각' : rec?.isLate === false ? '정시' : '-'}
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
                 );
@@ -622,41 +846,167 @@ export default function SessionDetailPage() {
       )}
 
       {/* Monday Schedule Modal */}
-      {showMondayModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">월요일 편성 — 첫 경기 선수 선택</h3>
-              <p className="text-xs text-slate-500 mt-1">선택한 선수가 R1·R2 먼저 뛰고 R3 쉬고 R4·R5 뜁니다.</p>
-            </div>
-            <div className="px-5 py-4 space-y-2">
-              {attendingPlayers.filter(p => p.gender === 'male').map(p => (
-                <label key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer hover:bg-slate-50 transition-colors"
-                  style={{ borderColor: mondayFirstPlayer === p.name ? '#6366f1' : '#e2e8f0', backgroundColor: mondayFirstPlayer === p.name ? '#eef2ff' : '' }}>
-                  <input
-                    type="radio"
-                    name="mondayFirst"
-                    checked={mondayFirstPlayer === p.name}
-                    onChange={() => setMondayFirstPlayer(p.name)}
-                    className="accent-indigo-600"
-                  />
-                  <span className="font-medium text-slate-800">{p.name}</span>
-                  <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
-                </label>
-              ))}
-            </div>
-            <div className="px-5 py-4 border-t border-slate-100 flex gap-2 justify-end">
-              <button onClick={() => setShowMondayModal(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">취소</button>
-              <button
-                onClick={handleMondayGenerate}
-                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 font-medium"
-              >
-                편성 생성
-              </button>
+      {showMondayModal && (() => {
+        const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
+        const yomPlayer = malePlayers.find(p => p.name === '염주호');
+        const othersForR1 = malePlayers.filter(p => p.name !== '염주호');
+        const toggleR1 = (id: string) => {
+          setMondayR1Selection(prev =>
+            prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 3 ? [...prev, id] : prev
+          );
+          setMondayCompanion(prev => prev === id ? '' : prev);
+        };
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h3 className="font-semibold text-slate-800">월요일 편성</h3>
+                <p className="text-xs text-slate-500 mt-1">첫 경기 4명 선택 후 염주호 파트너를 지정하세요.</p>
+              </div>
+
+              {/* Step 1: R1 선수 선택 */}
+              <div className="px-5 pt-4 pb-2">
+                <p className="text-xs font-semibold text-slate-500 mb-2">
+                  1단계 — 첫 경기(R1) 참여 선수 선택 <span className="text-indigo-500">({mondayR1Selection.length}/3 선택)</span>
+                </p>
+                {/* 염주호 고정 */}
+                {yomPlayer && (
+                  <div className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 bg-indigo-50 border-indigo-300">
+                    <input type="checkbox" checked disabled className="accent-indigo-600" />
+                    <span className="font-medium text-indigo-800">{yomPlayer.name}</span>
+                    <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 rounded">고정</span>
+                    <span className="ml-auto text-xs text-slate-400 font-mono">{yomPlayer.ntrp.toFixed(1)}</span>
+                  </div>
+                )}
+                {othersForR1.map(p => {
+                  const selected = mondayR1Selection.includes(p.id);
+                  return (
+                    <label key={p.id}
+                      className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 cursor-pointer hover:bg-slate-50 transition-colors"
+                      style={{ borderColor: selected ? '#6366f1' : '#e2e8f0', backgroundColor: selected ? '#eef2ff' : '' }}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleR1(p.id)}
+                        disabled={!selected && mondayR1Selection.length >= 3}
+                        className="accent-indigo-600"
+                      />
+                      <span className="font-medium text-slate-800">{p.name}</span>
+                      <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Step 2: 파트너 선택 */}
+              {mondayR1Selection.length === 3 && (
+                <div className="px-5 pb-3 pt-1">
+                  <p className="text-xs font-semibold text-slate-500 mb-2">
+                    2단계 — 염주호 파트너 선택 <span className="text-xs font-normal text-slate-400">(함께 R1·R2·R4·R5 출전)</span>
+                  </p>
+                  {mondayR1Selection.map(id => {
+                    const p = malePlayers.find(mp => mp.id === id)!;
+                    return (
+                      <label key={id}
+                        className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 cursor-pointer hover:bg-slate-50 transition-colors"
+                        style={{ borderColor: mondayCompanion === id ? '#6366f1' : '#e2e8f0', backgroundColor: mondayCompanion === id ? '#eef2ff' : '' }}>
+                        <input
+                          type="radio"
+                          name="mondayCompanion"
+                          checked={mondayCompanion === id}
+                          onChange={() => setMondayCompanion(id)}
+                          className="accent-indigo-600"
+                        />
+                        <span className="font-medium text-slate-800">{p.name}</span>
+                        <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Step 3: 라운드 수 */}
+              <div className="px-5 pb-3 pt-1">
+                <p className="text-xs font-semibold text-slate-500 mb-2">3단계 — 라운드 수</p>
+                <div className="flex gap-2">
+                  {[5, 6].map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setMondayRounds(r)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${mondayRounds === r ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      {r}라운드
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-5 py-4 border-t border-slate-100 flex gap-2 justify-end">
+                <button onClick={() => setShowMondayModal(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">취소</button>
+                <button
+                  onClick={handleMondayGenerate}
+                  disabled={mondayR1Selection.length !== 3 || !mondayCompanion}
+                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-40"
+                >
+                  편성 생성
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {/* Substitute Player Modal */}
+      {substituteTarget && (() => {
+        const playingInRound = new Set(
+          pendingMatches
+            .filter(m => m.round === substituteTarget.round)
+            .flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
+        );
+        const restingPlayers = attendingPlayers.filter(p => !playingInRound.has(p.id));
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
+              <div className="px-5 py-4 border-b border-slate-100">
+                <h3 className="font-semibold text-slate-800">선수 교체</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  <span className="font-medium text-amber-600">{substituteTarget.player.name}</span>을(를) 대기 선수로 교체
+                </p>
+              </div>
+              <div className="px-5 py-3 max-h-72 overflow-y-auto">
+                {restingPlayers.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4">대기 중인 선수가 없습니다.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {restingPlayers.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleSubstitute(p)}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-green-400 hover:bg-green-50 transition-colors text-left"
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                        <span className="font-medium text-slate-800 text-sm">{p.name}</span>
+                        {p.type === 'guest' && (
+                          <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
+                        )}
+                        <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100">
+                <button
+                  onClick={() => setSubstituteTarget(null)}
+                  className="w-full py-2 text-sm text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Generate Settings Modal */}
       {showGenerateModal && (
@@ -768,6 +1118,22 @@ export default function SessionDetailPage() {
               )}
               {isAdminUser && editMode && (
                 <>
+                  <div className="flex items-center gap-1 border border-slate-300 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => handleRoundCountChange(-1)}
+                      disabled={pendingRoundsCount <= 1}
+                      className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                    >
+                      −
+                    </button>
+                    <span className="px-2 text-sm font-medium text-slate-700">{pendingRoundsCount}R</span>
+                    <button
+                      onClick={() => handleRoundCountChange(1)}
+                      className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
                   <button
                     onClick={handleEditCancel}
                     className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors"
@@ -815,20 +1181,45 @@ export default function SessionDetailPage() {
               ✓ 확정된 결과입니다. 스코어 수정이 잠겨 있습니다.
             </div>
           )}
+          {!editMode && (removedFromBracket.length > 0 || addedToBracket.length > 0) && isAdminUser && (
+            <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 text-sm text-orange-800">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-0.5">
+                  <p className="font-semibold">참석 인원 변경 감지됨</p>
+                  {removedFromBracket.length > 0 && (
+                    <p className="text-xs">불참으로 변경: {removedFromBracket.map(p => p.name).join(', ')} → 해당 경기 삭제</p>
+                  )}
+                  {addedToBracket.length > 0 && (
+                    <p className="text-xs">새 참석: {addedToBracket.map(p => p.name).join(', ')} → 편집 모드에서 추가 필요</p>
+                  )}
+                </div>
+                {removedFromBracket.length > 0 && (
+                  <button
+                    onClick={handleSyncBracket}
+                    className="shrink-0 px-3 py-1.5 bg-orange-600 text-white text-xs rounded-lg hover:bg-orange-700 font-medium"
+                  >
+                    대진표 업데이트
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {editMode && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
-              선수 이름 클릭 → 위치 교환 &nbsp;|&nbsp; ↑↓ 버튼 → 경기 순서 이동
+              선수 이름 클릭 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동
             </div>
           )}
 
-          {matches.length === 0 ? (
+          {matches.length === 0 && !editMode ? (
             <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
               <p className="text-slate-400 text-lg mb-2">아직 대진표가 없습니다.</p>
               {isAdminUser && <p className="text-slate-400 text-sm">참석 투표 완료 후 대진표를 생성하세요.</p>}
             </div>
           ) : (() => {
             const displaySource = editMode ? pendingMatches : matches;
-            const displayRounds = Array.from(new Set(displaySource.map(m => m.round))).sort((a, b) => a - b);
+            const displayRounds = editMode
+              ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
+              : Array.from(new Set(displaySource.map(m => m.round))).sort((a, b) => a - b);
             return displayRounds.map(round => (
               <RoundCard
                 key={round}
@@ -839,7 +1230,7 @@ export default function SessionDetailPage() {
                 onScoreUpdate={handleScoreUpdate}
                 editMode={editMode}
                 pendingMatches={displaySource.filter(m => m.round === round)}
-                selectedPlayer={selectedPlayer}
+                substituteTarget={substituteTarget}
                 onPlayerClick={handlePlayerClick}
                 showNtrp={isAdminUser}
                 dragMatchId={dragMatchId}
@@ -847,6 +1238,13 @@ export default function SessionDetailPage() {
                 onDragStart={setDragMatchId}
                 onDragOver={setDragOverMatchId}
                 onDrop={handleDragDrop}
+                dragOverEmptyRound={dragOverEmptyRound}
+                onDragOverEmptyRound={setDragOverEmptyRound}
+                onDropIntoRound={handleDragToEmptyRound}
+                matchGameNumbers={matchGameNumbers}
+                onAutoFillRound={handleAutoFillRound}
+                onDeleteMatch={handleDeleteMatch}
+                onDeleteRound={handleDeleteRound}
               />
             ));
           })()}
@@ -1066,8 +1464,10 @@ function SessionResultTab({ attendingPlayers, matches }: { attendingPlayers: Pla
 
 function RoundCard({
   round, matches, attendingPlayers, canEditScore, onScoreUpdate,
-  editMode, pendingMatches, selectedPlayer, onPlayerClick, showNtrp,
+  editMode, pendingMatches, substituteTarget, onPlayerClick, showNtrp,
   dragMatchId, dragOverMatchId, onDragStart, onDragOver, onDrop,
+  dragOverEmptyRound, onDragOverEmptyRound, onDropIntoRound,
+  matchGameNumbers, onAutoFillRound, onDeleteMatch, onDeleteRound,
 }: {
   round: number;
   matches: Match[];
@@ -1076,7 +1476,7 @@ function RoundCard({
   onScoreUpdate: (id: string, s1: string, s2: string) => void;
   editMode: boolean;
   pendingMatches: Match[];
-  selectedPlayer: SelectedPlayer;
+  substituteTarget: SubstituteTarget;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
   showNtrp: boolean;
   dragMatchId: string | null;
@@ -1084,36 +1484,77 @@ function RoundCard({
   onDragStart: (id: string) => void;
   onDragOver: (id: string) => void;
   onDrop: (id: string) => void;
+  dragOverEmptyRound?: number | null;
+  onDragOverEmptyRound?: (round: number | null) => void;
+  onDropIntoRound?: (round: number) => void;
+  matchGameNumbers?: Map<string, number>;
+  onAutoFillRound?: (round: number) => void;
+  onDeleteMatch?: (matchId: string) => void;
+  onDeleteRound?: (round: number) => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
     displayMatches.flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
   );
   const restingPlayers = attendingPlayers.filter(p => !playingIds.has(p.id));
+  const isEmptyRound = editMode && displayMatches.length === 0;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+      <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
         <h2 className="font-semibold text-slate-700">{round}라운드</h2>
+        {editMode && onDeleteRound && (
+          <button
+            onClick={() => onDeleteRound(round)}
+            className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+          >
+            라운드 삭제
+          </button>
+        )}
       </div>
-      <div className="divide-y divide-slate-100">
-        {displayMatches.sort((a, b) => a.court - b.court).map(m => (
-          <MatchCard
-            key={m.id}
-            match={m}
-            canEditScore={canEditScore}
-            onScoreUpdate={onScoreUpdate}
-            editMode={editMode}
-            selectedPlayer={selectedPlayer}
-            onPlayerClick={onPlayerClick}
-            showNtrp={showNtrp}
-            onDragStart={onDragStart}
-            onDragOver={() => onDragOver(m.id)}
-            onDrop={onDrop}
-            isDragOver={dragOverMatchId === m.id && dragMatchId !== m.id}
-          />
-        ))}
-      </div>
+      {isEmptyRound ? (
+        <div
+          className={`px-5 py-6 text-center transition-colors ${dragOverEmptyRound === round ? 'bg-indigo-50 border-2 border-dashed border-indigo-400' : 'border-2 border-dashed border-slate-200'}`}
+          onDragOver={e => { e.preventDefault(); onDragOverEmptyRound?.(round); }}
+          onDragLeave={() => onDragOverEmptyRound?.(null)}
+          onDrop={e => { e.preventDefault(); onDropIntoRound?.(round); onDragOverEmptyRound?.(null); }}
+        >
+          <p className="text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
+          {onAutoFillRound && (
+            <button
+              onClick={() => onAutoFillRound(round)}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium"
+            >
+              자동 배정
+            </button>
+          )}
+        </div>
+      ) : (
+        <div
+          className={`divide-y divide-slate-100 ${editMode && dragOverEmptyRound === round ? 'bg-indigo-50' : ''}`}
+          onDragOver={e => { if (displayMatches.length > 0) return; e.preventDefault(); onDragOverEmptyRound?.(round); }}
+          onDrop={e => { if (displayMatches.length > 0) return; e.preventDefault(); onDropIntoRound?.(round); }}
+        >
+          {displayMatches.sort((a, b) => a.court - b.court).map(m => (
+            <MatchCard
+              key={m.id}
+              match={m}
+              canEditScore={canEditScore}
+              onScoreUpdate={onScoreUpdate}
+              editMode={editMode}
+              substituteTarget={substituteTarget}
+              onPlayerClick={onPlayerClick}
+              showNtrp={showNtrp}
+              onDragStart={onDragStart}
+              onDragOver={() => onDragOver(m.id)}
+              onDrop={onDrop}
+              isDragOver={dragOverMatchId === m.id && dragMatchId !== m.id}
+              matchGameNumbers={matchGameNumbers}
+              onDeleteMatch={onDeleteMatch}
+            />
+          ))}
+        </div>
+      )}
       {restingPlayers.length > 0 && (
         <div className="px-5 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-amber-600 shrink-0">휴식</span>
@@ -1130,20 +1571,22 @@ function RoundCard({
 }
 
 function MatchCard({
-  match, canEditScore, onScoreUpdate, editMode, selectedPlayer, onPlayerClick, showNtrp,
-  onDragStart, onDragOver, onDrop, isDragOver,
+  match, canEditScore, onScoreUpdate, editMode, substituteTarget, onPlayerClick, showNtrp,
+  onDragStart, onDragOver, onDrop, isDragOver, matchGameNumbers, onDeleteMatch,
 }: {
   match: Match;
   canEditScore: boolean;
   onScoreUpdate: (id: string, s1: string, s2: string) => void;
   editMode: boolean;
-  selectedPlayer: SelectedPlayer;
+  substituteTarget: SubstituteTarget;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
   showNtrp: boolean;
   onDragStart?: (matchId: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (matchId: string) => void;
   isDragOver?: boolean;
+  matchGameNumbers?: Map<string, number>;
+  onDeleteMatch?: (matchId: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [score1, setScore1] = useState(match.score1 || '');
@@ -1173,9 +1616,17 @@ function MatchCard({
             {matchTypeLabel[match.matchType]}
           </span>
         </div>
-        {match.isCompleted && (
-          <span className="text-xs text-slate-400">✓ 완료</span>
-        )}
+        <div className="flex items-center gap-2">
+          {match.isCompleted && <span className="text-xs text-slate-400">✓ 완료</span>}
+          {editMode && onDeleteMatch && (
+            <button
+              onClick={e => { e.stopPropagation(); onDeleteMatch(match.id); }}
+              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+            >
+              경기 삭제
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -1185,16 +1636,18 @@ function MatchCard({
             <PlayerBadge
               player={match.team1.player1}
               editMode={editMode}
-              isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team1' && selectedPlayer?.slot === 'player1'}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team1' && substituteTarget?.slot === 'player1'}
               onClick={() => onPlayerClick(match.id, 'team1', 'player1', match.team1.player1)}
               showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team1.player1.id}`)}
             />
             <PlayerBadge
               player={match.team1.player2}
               editMode={editMode}
-              isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team1' && selectedPlayer?.slot === 'player2'}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team1' && substituteTarget?.slot === 'player2'}
               onClick={() => onPlayerClick(match.id, 'team1', 'player2', match.team1.player2)}
               showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team1.player2.id}`)}
             />
           </div>
           {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
@@ -1253,16 +1706,18 @@ function MatchCard({
             <PlayerBadge
               player={match.team2.player1}
               editMode={editMode}
-              isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team2' && selectedPlayer?.slot === 'player1'}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team2' && substituteTarget?.slot === 'player1'}
               onClick={() => onPlayerClick(match.id, 'team2', 'player1', match.team2.player1)}
               showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team2.player1.id}`)}
             />
             <PlayerBadge
               player={match.team2.player2}
               editMode={editMode}
-              isSelected={selectedPlayer?.matchId === match.id && selectedPlayer?.team === 'team2' && selectedPlayer?.slot === 'player2'}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team2' && substituteTarget?.slot === 'player2'}
               onClick={() => onPlayerClick(match.id, 'team2', 'player2', match.team2.player2)}
               showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team2.player2.id}`)}
             />
           </div>
           {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t2Ntrp}</div>}
@@ -1273,13 +1728,14 @@ function MatchCard({
 }
 
 function PlayerBadge({
-  player, editMode, isSelected, onClick, showNtrp,
+  player, editMode, isSelected, onClick, showNtrp, gameNum,
 }: {
   player: Player;
   editMode: boolean;
   isSelected: boolean;
   onClick: () => void;
   showNtrp: boolean;
+  gameNum?: number;
 }) {
   const content = (
     <div className="flex items-center gap-1.5">
@@ -1287,6 +1743,9 @@ function PlayerBadge({
       <span className="text-sm font-medium text-slate-800 truncate">{player.name}</span>
       {player.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
+      )}
+      {gameNum !== undefined && (
+        <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
       )}
       {showNtrp && <span className="text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
     </div>

@@ -40,6 +40,7 @@ export interface Session {
   votingDeadline: string; // ISO date string
   isGenerated: boolean;
   isConfirmed: boolean;
+  trackLate: boolean; // 지각여부 추적 여부
   createdAt: Date;
 }
 
@@ -52,6 +53,7 @@ export interface AttendanceRecord {
   gender: Gender;
   ntrp: number;
   attending: boolean;
+  isLate?: boolean; // 지각 여부 (true=지각, false=정시, undefined=미응답)
   updatedAt: Date;
 }
 

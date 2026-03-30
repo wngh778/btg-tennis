@@ -138,6 +138,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     votingDeadline: row.voting_deadline as string,
     isGenerated: row.is_generated as boolean,
     isConfirmed: row.is_confirmed as boolean,
+    trackLate: (row.track_late as boolean) ?? false,
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -179,6 +180,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
       voting_deadline: data.votingDeadline,
       is_generated: data.isGenerated,
       is_confirmed: data.isConfirmed,
+      track_late: data.trackLate ?? false,
     })
     .select('id')
     .single();
@@ -196,6 +198,7 @@ export async function updateSession(id: string, data: Partial<Omit<Session, 'id'
   if (data.votingDeadline !== undefined) update.voting_deadline = data.votingDeadline;
   if (data.isGenerated !== undefined) update.is_generated = data.isGenerated;
   if (data.isConfirmed !== undefined) update.is_confirmed = data.isConfirmed;
+  if (data.trackLate !== undefined) update.track_late = data.trackLate;
   const { error } = await supabase.from('sessions').update(update).eq('id', id);
   if (error) throw error;
 }
@@ -221,6 +224,7 @@ function rowToAttendance(row: Record<string, unknown>): AttendanceRecord {
     gender: row.gender as AttendanceRecord['gender'],
     ntrp: row.ntrp as number,
     attending: row.attending as boolean,
+    isLate: row.is_late as boolean | undefined,
     updatedAt: new Date(row.updated_at as string),
   };
 }
@@ -235,21 +239,20 @@ export async function getAttendance(sessionId: string): Promise<AttendanceRecord
 }
 
 export async function setAttendance(data: Omit<AttendanceRecord, 'id' | 'updatedAt'>): Promise<void> {
+  const upsertData: Record<string, unknown> = {
+    session_id: data.sessionId,
+    player_id: data.playerId,
+    player_type: data.playerType,
+    player_name: data.playerName,
+    gender: data.gender,
+    ntrp: data.ntrp,
+    attending: data.attending,
+    updated_at: new Date().toISOString(),
+  };
+  if (data.isLate !== undefined) upsertData.is_late = data.isLate;
   const { error } = await supabase
     .from('attendance')
-    .upsert(
-      {
-        session_id: data.sessionId,
-        player_id: data.playerId,
-        player_type: data.playerType,
-        player_name: data.playerName,
-        gender: data.gender,
-        ntrp: data.ntrp,
-        attending: data.attending,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'session_id,player_id' }
-    );
+    .upsert(upsertData, { onConflict: 'session_id,player_id' });
   if (error) throw error;
 }
 
@@ -342,6 +345,27 @@ export async function saveMatches(sessionId: string, matches: Omit<Match, 'id'>[
   }));
 
   const { error } = await supabase.from('matches').insert(rows);
+  if (error) throw error;
+}
+
+export async function insertMatch(match: Omit<Match, 'id'>): Promise<string> {
+  const { data, error } = await supabase.from('matches').insert({
+    session_id: match.sessionId,
+    round: match.round,
+    court: match.court,
+    match_type: match.matchType,
+    team1: match.team1,
+    team2: match.team2,
+    score1: match.score1 ?? null,
+    score2: match.score2 ?? null,
+    is_completed: match.isCompleted,
+  }).select('id').single();
+  if (error) throw error;
+  return data.id;
+}
+
+export async function deleteMatch(id: string): Promise<void> {
+  const { error } = await supabase.from('matches').delete().eq('id', id);
   if (error) throw error;
 }
 
