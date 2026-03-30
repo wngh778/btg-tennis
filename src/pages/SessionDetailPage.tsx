@@ -60,6 +60,7 @@ export default function SessionDetailPage() {
   const [generateCourts, setGenerateCourts] = useState(4);
   const [generateRounds, setGenerateRounds] = useState(6);
   const [generateMixedRounds, setGenerateMixedRounds] = useState(2);
+  const [generateTargetGroup, setGenerateTargetGroup] = useState<string | 'all'>('all');
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
@@ -184,6 +185,7 @@ export default function SessionDetailPage() {
     setGenerateCourts(session.courts);
     setGenerateRounds(session.rounds);
     setGenerateMixedRounds(session.mixedRounds);
+    setGenerateTargetGroup('all');
     setShowGenerateModal(true);
   };
 
@@ -1163,20 +1165,24 @@ export default function SessionDetailPage() {
               )}
             </div>
             {session.gameMode === 'group' && groups.length > 0 && (
-              <div>
+              <div className="px-6 pb-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 생성 조</label>
                 <div className="flex gap-2 flex-wrap">
                   <button
-                    onClick={() => handleGenerateGroupMatches('all')}
-                    className="flex-1 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                    onClick={() => setGenerateTargetGroup('all')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      generateTargetGroup === 'all' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
                   >
                     전체 조
                   </button>
                   {groups.map(g => (
                     <button
                       key={g.id}
-                      onClick={() => handleGenerateGroupMatches(g.id)}
-                      className="flex-1 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 hover:bg-purple-100 hover:text-purple-700 transition-colors"
+                      onClick={() => setGenerateTargetGroup(g.id)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        generateTargetGroup === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
                     >
                       {g.name}
                     </button>
@@ -1191,14 +1197,12 @@ export default function SessionDetailPage() {
               >
                 취소
               </button>
-              {session.gameMode !== 'group' && (
-                <button
-                  onClick={handleGenerate}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
-                >
-                  {session.isGenerated ? '재생성' : '생성'}
-                </button>
-              )}
+              <button
+                onClick={() => session.gameMode === 'group' ? handleGenerateGroupMatches(generateTargetGroup) : handleGenerate()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+              >
+                {session.isGenerated ? '재생성' : '생성'}
+              </button>
             </div>
           </div>
         </div>
