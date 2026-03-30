@@ -121,6 +121,7 @@ export default function SessionDetailPage() {
       gender: member.gender,
       ntrp: member.ntrp,
       attending,
+      ...(session.trackLate && attending ? { isLate: false } : {}),
     });
     load();
   };
