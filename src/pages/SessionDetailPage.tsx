@@ -176,6 +176,9 @@ export default function SessionDetailPage() {
   const handleGenerate = async () => {
     setShowGenerateModal(false);
     const pastMatches = await getAllMatches(session.clubId);
+    const latePlayerIds = session.trackLate
+      ? new Set(attendance.filter(a => a.attending && a.isLate === true).map(a => a.playerId))
+      : new Set<string>();
     const generated = generateMatches({
       sessionId: session.id,
       players: attendingPlayers,
@@ -184,6 +187,7 @@ export default function SessionDetailPage() {
       mixedRounds: session.type === 'weekly' ? generateMixedRounds : 0,
       sessionType: session.type,
       pastMatches,
+      latePlayerIds,
     });
     await saveMatches(session.id, generated);
     await updateSession(session.id, {

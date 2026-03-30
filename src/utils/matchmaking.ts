@@ -205,11 +205,12 @@ export interface GenerateOptions {
   mixedRounds: number; // 혼복 라운드 수 (처음 N라운드)
   sessionType: 'weekly' | 'quarterly';
   pastMatches: Match[];
+  latePlayerIds?: Set<string>; // 지각자 ID 집합 - 1라운드 제외
 }
 
 export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const { sessionId, courts, totalRounds, mixedRounds, sessionType, pastMatches } = options;
-  const { players } = options;
+  const { players, latePlayerIds = new Set<string>() } = options;
 
   const history = buildHistory(pastMatches);
   const allMatches: Omit<Match, 'id'>[] = [];
@@ -221,9 +222,14 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const gameCounts = new Map<string, number>();
   players.forEach(p => gameCounts.set(p.id, 0));
 
-  // 게임 횟수 적은 순 정렬 (동점이면 랜덤)
-  const byLeastGames = (arr: Player[]): Player[] =>
+  // 게임 횟수 적은 순 정렬 (동점이면 랜덤), 1라운드는 지각자 후순위
+  const byLeastGames = (arr: Player[], round: number): Player[] =>
     [...arr].sort((a, b) => {
+      if (round === 1 && latePlayerIds.size > 0) {
+        const aLate = latePlayerIds.has(a.id) ? 1 : 0;
+        const bLate = latePlayerIds.has(b.id) ? 1 : 0;
+        if (aLate !== bLate) return aLate - bLate;
+      }
       const d = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
       return d !== 0 ? d : Math.random() - 0.5;
     });
@@ -237,7 +243,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
 
     if (sessionType === 'quarterly') {
       const matchType: MatchType = round % 2 === 1 ? 'male' : 'female';
-      const pool = byLeastGames(matchType === 'male' ? males : females);
+      const pool = byLeastGames(matchType === 'male' ? males : females, round);
       const activeCourts = Math.min(courts, Math.floor(pool.length / 4));
       if (activeCourts > 0) {
         const playing = pool.slice(0, activeCourts * 4);
@@ -249,8 +255,8 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
       const isMixed = round <= mixedRounds;
 
       if (isMixed) {
-        const sm = byLeastGames(males);
-        const sf = byLeastGames(females);
+        const sm = byLeastGames(males, round);
+        const sf = byLeastGames(females, round);
         const mixedCourts = Math.min(courts, Math.floor(sm.length / 2), Math.floor(sf.length / 2));
 
         const mixedMaleIds = new Set<string>();
@@ -267,7 +273,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         }
 
         // 남은 남자 → 남복 (남은 코트 수 제한)
-        const remMales = byLeastGames(males.filter(p => !mixedMaleIds.has(p.id)));
+        const remMales = byLeastGames(males.filter(p => !mixedMaleIds.has(p.id)), round);
         const maleCourts = Math.min(courts - mixedCourts, Math.floor(remMales.length / 4));
         if (maleCourts > 0) {
           const playing = remMales.slice(0, maleCourts * 4);
@@ -277,7 +283,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         }
 
         // 남은 여자 → 여복 (남은 코트 수 제한)
-        const remFemales = byLeastGames(females.filter(p => !mixedFemaleIds.has(p.id)));
+        const remFemales = byLeastGames(females.filter(p => !mixedFemaleIds.has(p.id)), round);
         const femaleCourts = Math.min(courts - mixedCourts - maleCourts, Math.floor(remFemales.length / 4));
         if (femaleCourts > 0) {
           const playing = remFemales.slice(0, femaleCourts * 4);
@@ -287,7 +293,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         }
       } else {
         // 비혼복 라운드: 남복 + 여복 동시 진행
-        const sm = byLeastGames(males);
+        const sm = byLeastGames(males, round);
         const maleCourts = Math.min(courts, Math.floor(sm.length / 4));
         if (maleCourts > 0) {
           const playing = sm.slice(0, maleCourts * 4);
@@ -296,7 +302,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
           addGames(playing);
         }
 
-        const sf = byLeastGames(females);
+        const sf = byLeastGames(females, round);
         const femaleCourts = Math.min(courts - (courtNum - 1), Math.floor(sf.length / 4));
         if (femaleCourts > 0) {
           const playing = sf.slice(0, femaleCourts * 4);
