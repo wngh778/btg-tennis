@@ -16,3 +16,6 @@ ALTER TABLE matches ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES session_gr
 
 CREATE INDEX IF NOT EXISTS idx_session_groups_session_id ON session_groups(session_id);
 CREATE INDEX IF NOT EXISTS idx_matches_group_id ON matches(group_id);
+
+-- Add title to sessions (optional custom name; null = use date)
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title TEXT;

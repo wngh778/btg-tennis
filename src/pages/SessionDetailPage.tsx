@@ -570,7 +570,12 @@ export default function SessionDetailPage() {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-xl font-bold text-slate-800">{formatDate(session.date)}</h1>
+              <h1 className="text-xl font-bold text-slate-800">
+                {session.title ?? formatDate(session.date)}
+              </h1>
+              {session.title && (
+                <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
+              )}
               <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
                 session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
               }`}>

@@ -131,6 +131,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     id: row.id as string,
     clubId: row.club_id as string,
     date: row.date as string,
+    title: (row.title as string | null) ?? null,
     type: row.type as Session['type'],
     gameMode: (row.game_mode as GameMode) ?? 'normal',
     courts: row.courts as number,
@@ -174,6 +175,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
     .insert({
       club_id: data.clubId,
       date: data.date,
+      title: data.title ?? null,
       type: data.type,
       game_mode: data.gameMode ?? 'normal',
       courts: data.courts,
@@ -193,6 +195,7 @@ export async function addSession(data: Omit<Session, 'id' | 'createdAt'>): Promi
 export async function updateSession(id: string, data: Partial<Omit<Session, 'id' | 'createdAt'>>): Promise<void> {
   const update: Record<string, unknown> = {};
   if (data.date !== undefined) update.date = data.date;
+  if (data.title !== undefined) update.title = data.title ?? null;
   if (data.type !== undefined) update.type = data.type;
   if (data.gameMode !== undefined) update.game_mode = data.gameMode;
   if (data.courts !== undefined) update.courts = data.courts;

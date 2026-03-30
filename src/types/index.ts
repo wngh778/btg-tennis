@@ -34,6 +34,7 @@ export interface Session {
   id: string;
   clubId: string;
   date: string; // YYYY-MM-DD
+  title: string | null; // custom name; null = use date
   type: SessionType;
   gameMode: GameMode;
   courts: number; // default 4

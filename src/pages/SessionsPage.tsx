@@ -26,6 +26,7 @@ function SessionForm({
 }: {
   initialValues: {
     date: string;
+    title: string | null;
     type: SessionType;
     gameMode: GameMode;
     groupCount: number;
@@ -37,6 +38,7 @@ function SessionForm({
   };
   onSubmit: (values: {
     date: string;
+    title: string | null;
     type: SessionType;
     gameMode: GameMode;
     groupCount: number;
@@ -51,6 +53,8 @@ function SessionForm({
   submitClass: string;
 }) {
   const [date, setDate] = useState(initialValues.date);
+  const [useCustomTitle, setUseCustomTitle] = useState(initialValues.title !== null);
+  const [customTitle, setCustomTitle] = useState(initialValues.title ?? '');
   const [type, setType] = useState<SessionType>(initialValues.type);
   const [gameMode, setGameMode] = useState<GameMode>(initialValues.gameMode);
   const [groupCount, setGroupCount] = useState(initialValues.groupCount);
@@ -86,6 +90,7 @@ function SessionForm({
       : null;
     await onSubmit({
       date,
+      title: useCustomTitle && customTitle.trim() ? customTitle.trim() : null,
       type,
       gameMode,
       groupCount,
@@ -110,6 +115,26 @@ function SessionForm({
             required
             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
+        </div>
+        <div className="col-span-2">
+          <label className="flex items-center gap-2 cursor-pointer select-none mb-1">
+            <input
+              type="checkbox"
+              checked={useCustomTitle}
+              onChange={e => { setUseCustomTitle(e.target.checked); if (!e.target.checked) setCustomTitle(''); }}
+              className="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+            />
+            <span className="text-xs font-medium text-slate-600">직접 이름 설정</span>
+          </label>
+          {useCustomTitle && (
+            <input
+              type="text"
+              value={customTitle}
+              onChange={e => setCustomTitle(e.target.value)}
+              placeholder="예: 2026 봄 정기대회"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">경기 종류</label>
@@ -261,6 +286,7 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
     const sessionId = await addSession({
       clubId: currentClub.id,
       ...sessionData,
+      title: sessionData.title ?? null,
       isGenerated: false,
       isConfirmed: false,
     });
@@ -277,6 +303,7 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
     <SessionForm
       initialValues={{
         date: nextSunday,
+        title: null,
         type: 'weekly',
         gameMode: 'normal',
         groupCount: 2,
@@ -305,6 +332,7 @@ function EditSessionForm({ session, onSave, onCancel }: { session: Session; onSa
     <SessionForm
       initialValues={{
         date: session.date,
+        title: session.title ?? null,
         type: session.type,
         gameMode: session.gameMode ?? 'normal',
         groupCount: 2,
@@ -343,8 +371,9 @@ export default function SessionsPage() {
 
   useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, currentClub]);
 
-  const handleDelete = async (id: string, date: string) => {
-    if (!confirm(`${formatDate(date)} 경기를 삭제하시겠습니까?`)) return;
+  const handleDelete = async (id: string, date: string, title?: string | null) => {
+    const label = title ?? formatDate(date);
+    if (!confirm(`${label} 경기를 삭제하시겠습니까?`)) return;
     await deleteSession(id);
     load();
   };
@@ -411,7 +440,7 @@ export default function SessionsPage() {
   );
 }
 
-function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session; onDelete: (id: string, date: string) => void; onSaved: () => void; isAdmin: boolean }) {
+function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session; onDelete: (id: string, date: string, title?: string | null) => void; onSaved: () => void; isAdmin: boolean }) {
   const isPast = session.date < new Date().toISOString().split('T')[0];
   const isVotingClosed = session.votingDeadline ? new Date() > new Date(session.votingDeadline) : false;
   const [editing, setEditing] = useState(false);
@@ -421,7 +450,12 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
       <div className="p-5 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold text-slate-800">{formatDate(session.date)}</span>
+            <span className="font-semibold text-slate-800">
+              {session.title ?? formatDate(session.date)}
+            </span>
+            {session.title && (
+              <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
+            )}
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
               session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
             }`}>
@@ -459,7 +493,7 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
                 수정
               </button>
               <button
-                onClick={() => onDelete(session.id, session.date)}
+                onClick={() => onDelete(session.id, session.date, session.title)}
                 className="px-3 py-2 text-red-400 hover:text-red-600 text-sm"
               >
                 삭제
