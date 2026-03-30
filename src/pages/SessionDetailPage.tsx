@@ -98,6 +98,15 @@ export default function SessionDetailPage() {
   // auth 초기화 완료 후에만 데이터 로드 (새로고침 시 세션 미초기화 상태에서 쿼리 실행 방지)
   useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
 
+  // 조별경기: 그룹 로드 후 내 그룹 자동 선택
+  useEffect(() => {
+    if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {
+      const myMemberInEffect = appUser ? members.filter(m => m.isActive).find(m => m.name === appUser.username) ?? null : null;
+      const myGroupInEffect = myMemberInEffect ? groups.find(g => g.memberIds.includes(myMemberInEffect.id)) ?? null : null;
+      setSelectedGroupId(myGroupInEffect?.id ?? groups[0]?.id ?? null);
+    }
+  }, [groups, session?.gameMode]);
+
   if (loading) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (error) return (
     <div className="text-center py-16">
@@ -472,14 +481,6 @@ export default function SessionDetailPage() {
 
   // 본인 계정에 연결된 멤버 (username === member.name)
   const myMember = appUser ? activeMembers.find(m => m.name === appUser.username) ?? null : null;
-  const myGroup = myMember ? groups.find(g => g.memberIds.includes(myMember.id)) ?? null : null;
-
-  // 조별경기: 내 그룹 자동 선택
-  useEffect(() => {
-    if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {
-      setSelectedGroupId(myGroup?.id ?? groups[0]?.id ?? null);
-    }
-  }, [groups, myGroup, session?.gameMode]);
   const myAttendanceRec = myMember ? attendance.find(a => a.playerId === myMember.id) ?? null : null;
   const myAttendance = myAttendanceRec?.attending ?? null;
   const myIsLate = myAttendanceRec?.isLate;
