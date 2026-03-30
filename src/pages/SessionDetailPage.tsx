@@ -703,10 +703,14 @@ export default function SessionDetailPage() {
                 const canVoteThis = canVoteForMember(m.id);
                 const isMe = m.id === myMember?.id;
                 return (
-                  <div key={m.id} className={`px-5 py-3 flex items-center justify-between ${isMe ? 'bg-green-50' : ''}`}>
+                  <div key={m.id} className={`px-5 py-3 flex items-center justify-between transition-colors ${
+                    attending === true
+                      ? isMe ? 'bg-green-100' : 'bg-green-50'
+                      : isMe ? 'bg-green-50' : ''
+                  }`}>
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                      <span className={`font-medium ${isMe ? 'text-green-700' : 'text-slate-800'}`}>{m.name}</span>
+                      <span className={`font-medium ${attending === true ? 'text-green-700' : isMe ? 'text-green-700' : 'text-slate-800'}`}>{m.name}</span>
                       {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                       {isAdminUser && <span className="text-xs font-mono text-slate-400">{m.ntrp.toFixed(1)}</span>}
                     </div>
@@ -737,30 +741,34 @@ export default function SessionDetailPage() {
                       >
                         불참
                       </button>
-                      {session.trackLate && attending === true && (
-                        canVoteThis ? (
-                          <button
-                            onClick={() => handleMemberLate(m, !(rec?.isLate ?? false))}
-                            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                      {session.trackLate ? (
+                        attending === true ? (
+                          canVoteThis ? (
+                            <button
+                              onClick={() => handleMemberLate(m, !(rec?.isLate ?? false))}
+                              className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                rec?.isLate
+                                  ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
+                                  : 'bg-green-50 text-green-600 hover:bg-green-100'
+                              }`}
+                            >
+                              {rec?.isLate ? '지각' : '정시'}
+                            </button>
+                          ) : (
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
                               rec?.isLate
-                                ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
-                                : 'bg-green-50 text-green-600 hover:bg-green-100'
-                            }`}
-                          >
-                            {rec?.isLate ? '지각' : '정시'}
-                          </button>
+                                ? 'bg-orange-100 text-orange-600'
+                                : rec?.isLate === false
+                                ? 'bg-green-50 text-green-600'
+                                : 'bg-slate-100 text-slate-400'
+                            }`}>
+                              {rec?.isLate ? '지각' : rec?.isLate === false ? '정시' : '-'}
+                            </span>
+                          )
                         ) : (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            rec?.isLate
-                              ? 'bg-orange-100 text-orange-600'
-                              : rec?.isLate === false
-                              ? 'bg-green-50 text-green-600'
-                              : 'bg-slate-100 text-slate-400'
-                          }`}>
-                            {rec?.isLate ? '지각' : rec?.isLate === false ? '정시' : '-'}
-                          </span>
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-slate-50 text-slate-300">-</span>
                         )
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 );
