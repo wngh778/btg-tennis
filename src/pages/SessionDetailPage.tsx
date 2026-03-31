@@ -78,18 +78,11 @@ export default function SessionDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('요청 시간이 초과되었습니다. 새로고침 해주세요.')), 10000)
-      );
-      const fetchData = async () => {
-        const [s, g, a, mx, grps] = await Promise.all([
-          getSession(id), getGuests(id), getAttendance(id), getMatches(id), getSessionGroups(id),
-        ]);
-        const clubId = s?.clubId ?? currentClub?.id;
-        const m = clubId ? await getMembers(clubId) : [];
-        return { s, m, g, a, mx, grps };
-      };
-      const { s, m, g, a, mx, grps } = await Promise.race([fetchData(), timeout]);
+      const [s, g, a, mx, grps] = await Promise.all([
+        getSession(id), getGuests(id), getAttendance(id), getMatches(id), getSessionGroups(id),
+      ]);
+      const clubId = s?.clubId ?? currentClub?.id;
+      const m = clubId ? await getMembers(clubId) : [];
       setSession(s);
       setMembers(m);
       setGuests(g);
