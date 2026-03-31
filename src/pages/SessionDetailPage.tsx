@@ -1248,90 +1248,90 @@ export default function SessionDetailPage() {
       })()}
 
       {/* Generate Settings Modal */}
-      {/* 간소화 보기 - 캡처 최적화 */}
+      {/* 간소화 보기 - 작은 팝업, 캡처 최적화 */}
       {showSimpleView && (
-        <div className="fixed inset-0 bg-white z-50 flex flex-col">
-          {/* 헤더 */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 shrink-0">
-            <button
-              onClick={() => setShowSimpleView(false)}
-              className="text-blue-600 text-sm font-medium"
-            >
-              닫기
-            </button>
-            <span className="font-bold text-slate-800 text-sm">
-              {session.title ?? formatDate(session.date)}
-            </span>
-            <div className="w-10" />
-          </div>
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowSimpleView(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 shrink-0">
+              <button
+                onClick={() => setShowSimpleView(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm"
+              >
+                닫기
+              </button>
+              <span className="font-bold text-slate-800 text-sm">
+                {session.title ?? formatDate(session.date)}
+              </span>
+              <button
+                onClick={() => {
+                  const url = window.location.origin + '/c/' + session.clubId;
+                  navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다')).catch(() => alert('링크가 복사되었습니다'));
+                }}
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+              >
+                공유
+              </button>
+            </div>
 
-          {/* 경기 목록 - 초밀집 레이아웃 */}
-          <div className="flex-1 overflow-y-auto">
-            {session.gameMode === 'group' && groups.length > 0 ? (
-              groups.map(group => {
-                const groupMatches = [...matches]
-                  .filter(m => m.groupId === group.id)
-                  .sort((a, b) => a.round - b.round || a.court - b.court);
-                if (groupMatches.length === 0) return null;
-                const playerNumMap = new Map<string, number>();
-                group.memberIds.forEach((id, i) => playerNumMap.set(id, i + 1));
-                const pLabel = (p: Player) => {
-                  const n = playerNumMap.get(p.id);
-                  return n ? `${n}${p.name}` : p.name;
-                };
-                return (
-                  <div key={group.id}>
-                    <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
-                      <span className="font-bold text-slate-700 text-xs">{group.name}</span>
-                    </div>
-                    {groupMatches.map(m => (
-                      <div key={m.id} className="flex items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                        <span className="flex-1 text-slate-700 truncate">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
-                        <span className="font-bold text-slate-800 px-1.5 shrink-0 tabular-nums">
-                          {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
-                        </span>
-                        <span className="flex-1 text-slate-700 text-right truncate">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })
-            ) : (
-              (() => {
-                const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
-                return rounds.map(round => {
-                  const roundMatches = matches
-                    .filter(m => m.round === round)
-                    .sort((a, b) => a.court - b.court);
+            {/* 경기 목록 */}
+            <div className="flex-1 overflow-y-auto">
+              {session.gameMode === 'group' && groups.length > 0 ? (
+                groups.map(group => {
+                  const groupMatches = [...matches]
+                    .filter(m => m.groupId === group.id)
+                    .sort((a, b) => a.round - b.round || a.court - b.court);
+                  if (groupMatches.length === 0) return null;
+                  const playerNumMap = new Map<string, number>();
+                  group.memberIds.forEach((id, i) => playerNumMap.set(id, i + 1));
+                  const pLabel = (p: Player) => {
+                    const n = playerNumMap.get(p.id);
+                    return n ? `${n}${p.name}` : p.name;
+                  };
                   return (
-                    <div key={round}>
+                    <div key={group.id}>
                       <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
-                        <span className="font-bold text-slate-700 text-xs">{round}R</span>
+                        <span className="font-bold text-slate-700 text-xs">{group.name}</span>
                       </div>
-                      {roundMatches.map(m => (
-                        <div key={m.id} className="flex items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                          <span className="flex-1 text-slate-700 truncate">{m.team1.player1.name} {m.team1.player2.name}</span>
-                          <span className="font-bold text-slate-800 px-1.5 shrink-0 tabular-nums">
+                      {groupMatches.map(m => (
+                        <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                          <span className="text-slate-700 truncate text-right pr-1">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
+                          <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
                             {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
                           </span>
-                          <span className="flex-1 text-slate-700 text-right truncate">{m.team2.player1.name} {m.team2.player2.name}</span>
+                          <span className="text-slate-700 truncate pl-1">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
                         </div>
                       ))}
                     </div>
                   );
-                });
-              })()
-            )}
-          </div>
-
-          {/* 하단 닫기 */}
-          <div className="px-3 py-2 border-t border-slate-200 shrink-0">
-            <button
-              onClick={() => setShowSimpleView(false)}
-              className="w-full py-2 rounded-xl border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors"
-            >
-              닫기
-            </button>
+                })
+              ) : (
+                (() => {
+                  const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
+                  return rounds.map(round => {
+                    const roundMatches = matches
+                      .filter(m => m.round === round)
+                      .sort((a, b) => a.court - b.court);
+                    return (
+                      <div key={round}>
+                        <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
+                          <span className="font-bold text-slate-700 text-xs">{round}R</span>
+                        </div>
+                        {roundMatches.map(m => (
+                          <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                            <span className="text-slate-700 truncate text-right pr-1">{m.team1.player1.name} {m.team1.player2.name}</span>
+                            <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
+                              {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
+                            </span>
+                            <span className="text-slate-700 truncate pl-1">{m.team2.player1.name} {m.team2.player2.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  });
+                })()
+              )}
+            </div>
           </div>
         </div>
       )}
