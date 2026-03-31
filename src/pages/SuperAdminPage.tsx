@@ -81,7 +81,7 @@ export default function SuperAdminPage() {
     if (!editClub) return;
     setClubSaving(true);
     try {
-      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts, color: editClub.color, dayOfWeek: editClub.dayOfWeek });
+      await updateClub(editClub.id, { name: editClub.name, defaultCourts: editClub.defaultCourts, color: editClub.color, dayOfWeek: editClub.dayOfWeek, autoCreateSession: editClub.autoCreateSession });
       setEditClub(null); load();
     } finally { setClubSaving(false); }
   };
@@ -248,6 +248,10 @@ export default function SuperAdminPage() {
                     {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}코트</option>)}
                   </select>
                   <input type="color" value={editClub.color ?? '#15803d'} onChange={e => setEditClub({ ...editClub, color: e.target.value })} className="w-8 h-8 rounded cursor-pointer border border-slate-300" />
+                  <label className="flex items-center gap-1.5 cursor-pointer text-sm text-slate-600">
+                    <input type="checkbox" checked={editClub.autoCreateSession} onChange={e => setEditClub({ ...editClub, autoCreateSession: e.target.checked })} className="w-3.5 h-3.5 text-green-600 rounded" />
+                    자동생성
+                  </label>
                   <button type="submit" disabled={clubSaving} className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">저장</button>
                   <button type="button" onClick={() => setEditClub(null)} className="px-3 py-1.5 text-slate-500 text-sm hover:text-slate-700">취소</button>
                 </form>
@@ -257,7 +261,7 @@ export default function SuperAdminPage() {
                     <div className="w-4 h-4 rounded-full border border-slate-200" style={{ backgroundColor: club.color ?? '#15803d' }} />
                     <div>
                       <p className="font-medium text-slate-800">{club.name}</p>
-                      <p className="text-xs text-slate-400">{club.dayOfWeek} · {club.defaultCourts}코트</p>
+                      <p className="text-xs text-slate-400">{club.dayOfWeek} · {club.defaultCourts}코트{club.autoCreateSession ? ' · 자동생성' : ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
