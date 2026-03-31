@@ -3,11 +3,7 @@ import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import type { Match, Session } from '../types';
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-}
+import { formatDate } from '../utils/formatting';
 
 interface PlayerStat {
   id: string;
@@ -24,6 +20,7 @@ interface CachedData {
   allMatches: Match[];
   playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>;
   attendanceCounts: Map<string, number>;
+  memberIds: Set<string>;
 }
 
 export default function StatsPage() {
@@ -34,6 +31,7 @@ export default function StatsPage() {
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [showGuests, setShowGuests] = useState(false);
   const cachedData = useRef<CachedData | null>(null);
 
   const computeStats = (
@@ -139,7 +137,8 @@ export default function StatsPage() {
         attendanceCounts.set(a.playerId, (attendanceCounts.get(a.playerId) ?? 0) + 1);
       });
 
-      cachedData.current = { allMatches, playerInfo, attendanceCounts };
+      const memberIds = new Set(members.map(m => m.id));
+      cachedData.current = { allMatches, playerInfo, attendanceCounts, memberIds };
       computeStats(allMatches, playerInfo, attendanceCounts, 'all');
     } catch (e) {
       console.error('stats load error:', e);
@@ -208,8 +207,14 @@ export default function StatsPage() {
 
       {/* Stats table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl">
-          <h2 className="font-semibold text-slate-700">선수별 전적 ({stats.length}명)</h2>
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-2xl flex items-center justify-between">
+          <h2 className="font-semibold text-slate-700">선수별 전적 ({showGuests ? stats.length : (cachedData.current ? stats.filter(s => cachedData.current!.memberIds.has(s.id)).length : stats.length)}명)</h2>
+          <button
+            onClick={() => setShowGuests(!showGuests)}
+            className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-500 hover:bg-slate-100 transition-colors"
+          >
+            {showGuests ? '게스트 숨기기' : '게스트 포함'}
+          </button>
         </div>
 
         {loading ? (
@@ -241,7 +246,7 @@ export default function StatsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {stats.map((s, idx) => {
+                {(showGuests ? stats : stats.filter(s => cachedData.current?.memberIds.has(s.id))).map((s, idx) => {
                   const total = s.wins + s.draws + s.losses;
                   const rate = total > 0 ? Math.round((s.wins / total) * 100) : 0;
                   const isMe = myUsername === s.name;

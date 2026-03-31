@@ -3,11 +3,7 @@ import { Link } from 'react-router-dom';
 import { getSessions } from '../lib/database';
 import { useClub } from '../contexts/ClubContext';
 import type { Session } from '../types';
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-}
+import { formatDate } from '../utils/formatting';
 
 export default function HomePage() {
   const { currentClub, loadingClubs } = useClub();

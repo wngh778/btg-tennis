@@ -113,9 +113,3 @@ export interface AppUser {
   defaultClubId: string | null;
   createdAt: Date;
 }
-
-export interface MatchHistory {
-  playerId: string;
-  partnerIds: string[]; // people played as partner
-  opponentIds: string[]; // people played as opponent
-}

@@ -5,11 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { getNextSunday } from '../utils/matchmaking';
 import type { Session, SessionType, GameMode } from '../types';
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-}
+import { formatDate } from '../utils/formatting';
 
 function getDefaultDeadlineDate(sessionDate: string): string {
   const d = new Date(sessionDate + 'T00:00:00');

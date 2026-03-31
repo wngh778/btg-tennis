@@ -222,6 +222,34 @@ export default function AdminPage() {
             </button>
           </div>
         </form>
+
+        {/* 공개 링크 */}
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <label className="block text-xs font-medium text-slate-600 mb-2">게스트 공개 링크</label>
+          <p className="text-xs text-slate-400 mb-2">이 링크를 게스트에게 전달하면 로그인 없이 대진표와 결과를 확인할 수 있습니다.</p>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={`${window.location.origin}/c/${currentClub.id}`}
+              className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 select-all"
+              onClick={e => (e.target as HTMLInputElement).select()}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const url = `${window.location.origin}/c/${currentClub.id}`;
+                navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다!')).catch(() => {
+                  const t = document.createElement('textarea');
+                  t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
+                  alert('링크가 복사되었습니다!');
+                });
+              }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors font-medium whitespace-nowrap"
+            >
+              링크 복사
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* App Users */}

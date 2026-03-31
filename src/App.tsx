@@ -11,27 +11,33 @@ import AdminPage from './pages/AdminPage';
 import SuperAdminPage from './pages/SuperAdminPage';
 import StatsPage from './pages/StatsPage';
 import AccountPage from './pages/AccountPage';
+import PublicClubPage from './pages/PublicClubPage';
 
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <ClubProvider>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/sessions" element={<SessionsPage />} />
-              <Route path="/sessions/:id" element={<SessionDetailPage />} />
-              <Route path="/members" element={<MembersPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/superadmin" element={<SuperAdminPage />} />
-              <Route path="/stats" element={<StatsPage />} />
-              <Route path="/account" element={<AccountPage />} />
-            </Routes>
-          </Layout>
-        </ClubProvider>
-      </AuthProvider>
+      <Routes>
+        <Route path="/c/:clubId" element={<PublicClubPage />} />
+        <Route path="/*" element={
+          <AuthProvider>
+            <ClubProvider>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/sessions" element={<SessionsPage />} />
+                  <Route path="/sessions/:id" element={<SessionDetailPage />} />
+                  <Route path="/members" element={<MembersPage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/admin" element={<AdminPage />} />
+                  <Route path="/superadmin" element={<SuperAdminPage />} />
+                  <Route path="/stats" element={<StatsPage />} />
+                  <Route path="/account" element={<AccountPage />} />
+                </Routes>
+              </Layout>
+            </ClubProvider>
+          </AuthProvider>
+        } />
+      </Routes>
     </BrowserRouter>
   );
 }

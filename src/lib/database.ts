@@ -214,6 +214,11 @@ export async function confirmSession(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function unconfirmSession(id: string): Promise<void> {
+  const { error } = await supabase.from('sessions').update({ is_confirmed: false }).eq('id', id);
+  if (error) throw error;
+}
+
 export async function deleteSession(id: string): Promise<void> {
   const { error } = await supabase.from('sessions').delete().eq('id', id);
   if (error) throw error;

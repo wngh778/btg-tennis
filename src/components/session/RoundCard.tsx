@@ -1,0 +1,361 @@
+import { useState, useRef } from 'react';
+import type { Player, Match } from '../../types';
+
+export type SubstituteTarget = {
+  matchId: string;
+  team: 'team1' | 'team2';
+  slot: 'player1' | 'player2';
+  player: Player;
+  round: number;
+} | null;
+
+const matchTypeLabel = { male: '남복', female: '여복', mixed: '혼복' };
+const matchTypeBg = { male: 'bg-blue-50 border-blue-200', female: 'bg-pink-50 border-pink-200', mixed: 'bg-purple-50 border-purple-200' };
+const matchTypeBadge = { male: 'bg-blue-100 text-blue-700', female: 'bg-pink-100 text-pink-700', mixed: 'bg-purple-100 text-purple-700' };
+
+export function PlayerBadge({
+  player, editMode, isSelected, onClick, showNtrp, gameNum,
+  onDragStart, onDrop,
+}: {
+  player: Player;
+  editMode: boolean;
+  isSelected: boolean;
+  onClick: () => void;
+  showNtrp: boolean;
+  gameNum?: number;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+}) {
+  const content = (
+    <div className="flex items-center gap-1.5">
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+      <span className="text-sm font-medium text-slate-800 truncate">{player.name}</span>
+      {player.type === 'guest' && (
+        <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
+      )}
+      {gameNum !== undefined && (
+        <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
+      )}
+      {showNtrp && <span className="text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
+    </div>
+  );
+
+  if (editMode) {
+    return (
+      <button
+        onClick={onClick}
+        draggable={true}
+        onDragStart={e => { e.stopPropagation(); onDragStart?.(e); }}
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={e => { e.stopPropagation(); onDrop?.(e); }}
+        className={`w-full text-left rounded-lg px-1.5 py-0.5 transition-colors ${
+          isSelected
+            ? 'bg-yellow-300 border border-yellow-500'
+            : 'hover:bg-yellow-100 border border-transparent'
+        }`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div>{content}</div>;
+}
+
+export function MatchCard({
+  match, canEditScore, onScoreUpdate, editMode, substituteTarget, onPlayerClick, showNtrp,
+  onDragStart, onDragOver, onDrop, isDragOver, matchGameNumbers, onDeleteMatch,
+  onPlayerDragStart, onPlayerDrop,
+}: {
+  match: Match;
+  canEditScore: boolean;
+  onScoreUpdate: (id: string, s1: string, s2: string) => void;
+  editMode: boolean;
+  substituteTarget: SubstituteTarget;
+  onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
+  showNtrp: boolean;
+  onDragStart?: (matchId: string) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (matchId: string) => void;
+  isDragOver?: boolean;
+  matchGameNumbers?: Map<string, number>;
+  onDeleteMatch?: (matchId: string) => void;
+  onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+  onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [score1, setScore1] = useState(match.score1 || '');
+  const [score2, setScore2] = useState(match.score2 || '');
+  const score2Ref = useRef<HTMLInputElement>(null);
+
+  const handleSave = () => {
+    onScoreUpdate(match.id, score1, score2);
+    setEditing(false);
+  };
+
+  const t1Ntrp = ((match.team1.player1.ntrp + match.team1.player2.ntrp) / 2).toFixed(1);
+  const t2Ntrp = ((match.team2.player1.ntrp + match.team2.player2.ntrp) / 2).toFixed(1);
+
+  return (
+    <div
+      className={`p-4 border-l-4 ${matchTypeBg[match.matchType]} ${isDragOver ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''} ${editMode ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      draggable={editMode}
+      onDragStart={editMode ? () => onDragStart?.(match.id) : undefined}
+      onDragOver={editMode ? (e) => { e.preventDefault(); onDragOver?.(e); } : undefined}
+      onDrop={editMode ? () => onDrop?.(match.id) : undefined}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {editMode && <span className="text-slate-300 text-sm select-none">⠿</span>}
+          <span className="font-semibold text-slate-600 text-sm">{match.round}R {match.court}코트</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${matchTypeBadge[match.matchType]}`}>
+            {matchTypeLabel[match.matchType]}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {match.isCompleted && <span className="text-xs text-slate-400">✓ 완료</span>}
+          {editMode && onDeleteMatch && (
+            <button
+              onClick={e => { e.stopPropagation(); onDeleteMatch(match.id); }}
+              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+            >
+              경기 삭제
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {/* Team 1 */}
+        <div className="flex-1 min-w-0 bg-white rounded-xl p-3 border border-slate-200">
+          <div className="space-y-1">
+            <PlayerBadge
+              player={match.team1.player1}
+              editMode={editMode}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team1' && substituteTarget?.slot === 'player1'}
+              onClick={() => onPlayerClick(match.id, 'team1', 'player1', match.team1.player1)}
+              showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team1.player1.id}`)}
+              onDragStart={() => onPlayerDragStart?.(match.id, 'team1', 'player1')}
+              onDrop={() => onPlayerDrop?.(match.id, 'team1', 'player1')}
+            />
+            <PlayerBadge
+              player={match.team1.player2}
+              editMode={editMode}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team1' && substituteTarget?.slot === 'player2'}
+              onClick={() => onPlayerClick(match.id, 'team1', 'player2', match.team1.player2)}
+              showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team1.player2.id}`)}
+              onDragStart={() => onPlayerDragStart?.(match.id, 'team1', 'player2')}
+              onDrop={() => onPlayerDrop?.(match.id, 'team1', 'player2')}
+            />
+          </div>
+          {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
+        </div>
+
+        {/* Score */}
+        <div className="text-center px-1 flex flex-col items-center gap-1">
+          {editing ? (
+            <>
+              <div className="flex items-center gap-1">
+                <input
+                  value={score1}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setScore1(v);
+                    if (v.length >= 1 && /^\d+$/.test(v)) {
+                      setTimeout(() => score2Ref.current?.focus(), 0);
+                    }
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); score2Ref.current?.focus(); } }}
+                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  inputMode="numeric"
+                  placeholder="0"
+                  autoFocus
+                />
+                <span className="text-slate-400 text-xs font-bold">:</span>
+                <input
+                  ref={score2Ref}
+                  value={score2}
+                  onChange={e => setScore2(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
+                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  inputMode="numeric"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex gap-1">
+                <button onClick={handleSave} className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">저장</button>
+                <button onClick={() => setEditing(false)} className="px-2 py-1 bg-slate-200 text-slate-600 text-xs rounded hover:bg-slate-300">취소</button>
+              </div>
+            </>
+          ) : (
+            <>
+              {match.isCompleted ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-lg font-bold text-slate-800">{match.score1}</span>
+                  <span className="text-xs text-slate-400 font-bold">:</span>
+                  <span className="text-lg font-bold text-slate-800">{match.score2}</span>
+                </div>
+              ) : (
+                <div className="text-slate-300 text-sm">vs</div>
+              )}
+              {canEditScore && !editMode && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    match.isCompleted
+                      ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      : 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
+                  }`}
+                >
+                  {match.isCompleted ? '수정' : '입력'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Team 2 */}
+        <div className="flex-1 min-w-0 bg-white rounded-xl p-3 border border-slate-200">
+          <div className="space-y-1">
+            <PlayerBadge
+              player={match.team2.player1}
+              editMode={editMode}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team2' && substituteTarget?.slot === 'player1'}
+              onClick={() => onPlayerClick(match.id, 'team2', 'player1', match.team2.player1)}
+              showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team2.player1.id}`)}
+              onDragStart={() => onPlayerDragStart?.(match.id, 'team2', 'player1')}
+              onDrop={() => onPlayerDrop?.(match.id, 'team2', 'player1')}
+            />
+            <PlayerBadge
+              player={match.team2.player2}
+              editMode={editMode}
+              isSelected={substituteTarget?.matchId === match.id && substituteTarget?.team === 'team2' && substituteTarget?.slot === 'player2'}
+              onClick={() => onPlayerClick(match.id, 'team2', 'player2', match.team2.player2)}
+              showNtrp={showNtrp}
+              gameNum={matchGameNumbers?.get(`${match.id}_${match.team2.player2.id}`)}
+              onDragStart={() => onPlayerDragStart?.(match.id, 'team2', 'player2')}
+              onDrop={() => onPlayerDrop?.(match.id, 'team2', 'player2')}
+            />
+          </div>
+          {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t2Ntrp}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function RoundCard({
+  round, matches, attendingPlayers, canEditScore, onScoreUpdate,
+  editMode, pendingMatches, substituteTarget, onPlayerClick, showNtrp,
+  dragMatchId, dragOverMatchId, onDragStart, onDragOver, onDrop,
+  dragOverEmptyRound, onDragOverEmptyRound, onDropIntoRound,
+  matchGameNumbers, onAutoFillRound, onDeleteMatch, onDeleteRound,
+  onPlayerDragStart, onPlayerDrop,
+}: {
+  round: number;
+  matches: Match[];
+  attendingPlayers: Player[];
+  canEditScore: boolean;
+  onScoreUpdate: (id: string, s1: string, s2: string) => void;
+  editMode: boolean;
+  pendingMatches: Match[];
+  substituteTarget: SubstituteTarget;
+  onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
+  showNtrp: boolean;
+  dragMatchId: string | null;
+  dragOverMatchId: string | null;
+  onDragStart: (id: string) => void;
+  onDragOver: (id: string) => void;
+  onDrop: (id: string) => void;
+  dragOverEmptyRound?: number | null;
+  onDragOverEmptyRound?: (round: number | null) => void;
+  onDropIntoRound?: (round: number) => void;
+  matchGameNumbers?: Map<string, number>;
+  onAutoFillRound?: (round: number) => void;
+  onDeleteMatch?: (matchId: string) => void;
+  onDeleteRound?: (round: number) => void;
+  onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+  onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+}) {
+  const displayMatches = editMode ? pendingMatches : matches;
+  const playingIds = new Set(
+    displayMatches.flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
+  );
+  const restingPlayers = attendingPlayers.filter(p => !playingIds.has(p.id));
+  const isEmptyRound = editMode && displayMatches.length === 0;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        <h2 className="font-semibold text-slate-700">{round}라운드</h2>
+        {editMode && onDeleteRound && (
+          <button
+            onClick={() => onDeleteRound(round)}
+            className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+          >
+            라운드 삭제
+          </button>
+        )}
+      </div>
+      {isEmptyRound ? (
+        <div
+          className={`px-5 py-6 text-center transition-colors ${dragOverEmptyRound === round ? 'bg-indigo-50 border-2 border-dashed border-indigo-400' : 'border-2 border-dashed border-slate-200'}`}
+          onDragOver={e => { e.preventDefault(); onDragOverEmptyRound?.(round); }}
+          onDragLeave={() => onDragOverEmptyRound?.(null)}
+          onDrop={e => { e.preventDefault(); onDropIntoRound?.(round); onDragOverEmptyRound?.(null); }}
+        >
+          <p className="text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
+          {onAutoFillRound && (
+            <button
+              onClick={() => onAutoFillRound(round)}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium"
+            >
+              자동 배정
+            </button>
+          )}
+        </div>
+      ) : (
+        <div
+          className={`divide-y divide-slate-100 ${editMode && dragOverEmptyRound === round ? 'bg-indigo-50' : ''}`}
+          onDragOver={e => { if (displayMatches.length > 0) return; e.preventDefault(); onDragOverEmptyRound?.(round); }}
+          onDrop={e => { if (displayMatches.length > 0) return; e.preventDefault(); onDropIntoRound?.(round); }}
+        >
+          {displayMatches.sort((a, b) => a.court - b.court).map(m => (
+            <MatchCard
+              key={m.id}
+              match={m}
+              canEditScore={canEditScore}
+              onScoreUpdate={onScoreUpdate}
+              editMode={editMode}
+              substituteTarget={substituteTarget}
+              onPlayerClick={onPlayerClick}
+              showNtrp={showNtrp}
+              onDragStart={onDragStart}
+              onDragOver={() => onDragOver(m.id)}
+              onDrop={onDrop}
+              isDragOver={dragOverMatchId === m.id && dragMatchId !== m.id}
+              matchGameNumbers={matchGameNumbers}
+              onDeleteMatch={onDeleteMatch}
+              onPlayerDragStart={onPlayerDragStart}
+              onPlayerDrop={onPlayerDrop}
+            />
+          ))}
+        </div>
+      )}
+      {restingPlayers.length > 0 && (
+        <div className="px-5 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-amber-600 shrink-0">휴식</span>
+          {restingPlayers.map(p => (
+            <span key={p.id} className="flex items-center gap-1 text-xs text-amber-700">
+              <span className={`w-1.5 h-1.5 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+              {p.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

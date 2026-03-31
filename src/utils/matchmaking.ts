@@ -335,14 +335,6 @@ export function getNextSunday(): string {
   return sunday.toISOString().split('T')[0];
 }
 
-export function getVotingDeadline(sessionDate: string, deadlineDay: 'friday' | 'saturday'): string {
-  const date = new Date(sessionDate);
-  const offset = deadlineDay === 'friday' ? -2 : -1;
-  date.setDate(date.getDate() + offset);
-  date.setHours(23, 59, 59, 0);
-  return date.toISOString();
-}
-
 export function isVotingOpen(deadline: string | null): boolean {
   if (deadline === null) return true; // 마감 없음 = 항상 열림
   return new Date() < new Date(deadline);
@@ -450,12 +442,15 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
     playing.forEach(p => gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1));
 
     bestMatches.forEach((m, i) => {
+      const allPlayers = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2];
+      const maleCount = allPlayers.filter(p => p.gender === 'male').length;
+      const matchType: MatchType = maleCount === 4 ? 'male' : maleCount === 0 ? 'female' : 'mixed';
       allMatches.push({
         sessionId,
         groupId,
         round,
         court: i + 1,
-        matchType: 'male' as const,
+        matchType,
         team1: m.team1,
         team2: m.team2,
         isCompleted: false,
