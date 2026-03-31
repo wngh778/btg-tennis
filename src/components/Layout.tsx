@@ -9,6 +9,19 @@ const navItems = [
   { path: '/stats', label: '전적' },
 ];
 
+// 탭 전환 후 복귀 시 자동 새로고침
+// 브라우저가 백그라운드 탭을 freeze하면 Supabase 내부 상태가 꼬여서 API 멈춤.
+// 탭 복귀 시 window.location.reload()로 깨끗한 상태 보장.
+let needsReload = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    needsReload = true;
+  } else if (document.visibilityState === 'visible' && needsReload) {
+    needsReload = false;
+    window.location.reload();
+  }
+});
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user, isAdminUser, isSuperAdmin, logout } = useAuth();
