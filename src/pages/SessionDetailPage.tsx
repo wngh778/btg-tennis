@@ -1265,7 +1265,7 @@ export default function SessionDetailPage() {
               </span>
               <button
                 onClick={() => {
-                  const url = window.location.origin + '/c/' + session.clubId;
+                  const url = window.location.origin + '/c/' + session.clubId + '/' + session.id;
                   navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다')).catch(() => alert('링크가 복사되었습니다'));
                 }}
                 className="text-blue-600 hover:text-blue-700 text-sm font-medium"
@@ -1584,7 +1584,7 @@ export default function SessionDetailPage() {
                 <>
                   <button
                     onClick={() => {
-                      const url = window.location.origin + '/c/' + session.clubId;
+                      const url = window.location.origin + '/c/' + session.clubId + '/' + session.id;
                       navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다')).catch(() => alert('링크가 복사되었습니다'));
                     }}
                     className="px-3 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"

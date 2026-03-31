@@ -17,6 +17,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/c/:clubId/:sessionId" element={<PublicClubPage />} />
         <Route path="/c/:clubId" element={<PublicClubPage />} />
         <Route path="/*" element={
           <AuthProvider>

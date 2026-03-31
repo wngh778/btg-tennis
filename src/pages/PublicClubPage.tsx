@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getClub, getSessions, getMatches, getAttendance } from '../lib/database';
-import type { Club, Session, Match, AttendanceRecord, Player } from '../types';
+import { getClub, getSessions, getMatches, getAttendance, getSession, getSessionGroups } from '../lib/database';
+import type { Club, Session, Match, AttendanceRecord, Player, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
 
 const matchTypeLabel = { male: '남복', female: '여복', mixed: '혼복' };
@@ -57,8 +57,112 @@ function PublicMatchCard({ match }: { match: Match }) {
   );
 }
 
+// 간소화 보기 (세션 직접 링크용)
+function SimpleSessionView({ session, matches, groups, clubName, clubColor }: {
+  session: Session;
+  matches: Match[];
+  groups: SessionGroup[];
+  clubName: string;
+  clubColor: string;
+}) {
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다')).catch(() => alert('링크가 복사되었습니다'));
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* 헤더 */}
+      <header className="text-white shadow-md shrink-0" style={{ backgroundColor: clubColor }}>
+        <div className="max-w-sm mx-auto px-4 py-2.5 flex items-center justify-between">
+          <span className="font-bold text-sm tracking-tight">{clubName}</span>
+          <button
+            onClick={handleShare}
+            className="text-white/80 hover:text-white text-xs font-medium"
+          >
+            공유
+          </button>
+        </div>
+      </header>
+
+      {/* 세션 제목 */}
+      <div className="bg-white border-b border-slate-200 shrink-0">
+        <div className="max-w-sm mx-auto px-4 py-2.5 flex items-center justify-between">
+          <span className="font-bold text-slate-800 text-sm">
+            {session.title ?? formatDate(session.date)}
+          </span>
+          <span className="text-xs text-slate-400">
+            {session.courts}코트 · {session.rounds}R
+          </span>
+        </div>
+      </div>
+
+      {/* 경기 목록 */}
+      <div className="flex-1 max-w-sm mx-auto w-full bg-white">
+        {matches.length === 0 ? (
+          <div className="text-center py-16 text-slate-400 text-sm">대진표가 없습니다.</div>
+        ) : session.gameMode === 'group' && groups.length > 0 ? (
+          groups.map(group => {
+            const groupMatches = [...matches]
+              .filter(m => m.groupId === group.id)
+              .sort((a, b) => a.round - b.round || a.court - b.court);
+            if (groupMatches.length === 0) return null;
+            const playerNumMap = new Map<string, number>();
+            group.memberIds.forEach((id, i) => playerNumMap.set(id, i + 1));
+            const pLabel = (p: Player) => {
+              const n = playerNumMap.get(p.id);
+              return n ? `${n}${p.name}` : p.name;
+            };
+            return (
+              <div key={group.id}>
+                <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
+                  <span className="font-bold text-slate-700 text-xs">{group.name}</span>
+                </div>
+                {groupMatches.map(m => (
+                  <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                    <span className="text-slate-700 truncate text-right pr-1">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
+                    <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
+                      {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
+                    </span>
+                    <span className="text-slate-700 truncate pl-1">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })
+        ) : (
+          (() => {
+            const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
+            return rounds.map(round => {
+              const roundMatches = matches
+                .filter(m => m.round === round)
+                .sort((a, b) => a.court - b.court);
+              return (
+                <div key={round}>
+                  <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
+                    <span className="font-bold text-slate-700 text-xs">{round}R</span>
+                  </div>
+                  {roundMatches.map(m => (
+                    <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                      <span className="text-slate-700 truncate text-right pr-1">{m.team1.player1.name} {m.team1.player2.name}</span>
+                      <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
+                        {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
+                      </span>
+                      <span className="text-slate-700 truncate pl-1">{m.team2.player1.name} {m.team2.player2.name}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            });
+          })()
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PublicClubPage() {
-  const { clubId } = useParams<{ clubId: string }>();
+  const { clubId, sessionId } = useParams<{ clubId: string; sessionId?: string }>();
   const [club, setClub] = useState<Club | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,26 +171,60 @@ export default function PublicClubPage() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [sessionMatches, setSessionMatches] = useState<Match[]>([]);
   const [sessionAttendance, setSessionAttendance] = useState<AttendanceRecord[]>([]);
+  const [sessionGroups, setSessionGroups] = useState<SessionGroup[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
+
+  // 직접 세션 링크 모드
+  const isDirectSessionLink = !!sessionId;
 
   useEffect(() => {
     if (!clubId) return;
-    (async () => {
-      try {
-        const [c, s] = await Promise.all([getClub(clubId), getSessions(clubId)]);
-        if (!c) {
+
+    if (isDirectSessionLink) {
+      // 세션 직접 링크: 클럽 + 세션 데이터만 로드
+      (async () => {
+        try {
+          const [c, s] = await Promise.all([getClub(clubId), getSession(sessionId)]);
+          if (!c || !s) {
+            setError('공개 접근이 설정되지 않았습니다. 관리자에게 문의하세요.');
+            return;
+          }
+          setClub(c);
+          setSelectedSession(s);
+
+          const [m, a, g] = await Promise.all([
+            getMatches(sessionId),
+            getAttendance(sessionId),
+            s.gameMode === 'group' ? getSessionGroups(sessionId) : Promise.resolve([]),
+          ]);
+          setSessionMatches(m);
+          setSessionAttendance(a);
+          setSessionGroups(g);
+        } catch {
           setError('공개 접근이 설정되지 않았습니다. 관리자에게 문의하세요.');
-          return;
+        } finally {
+          setLoading(false);
         }
-        setClub(c);
-        setSessions(s.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-      } catch {
-        setError('공개 접근이 설정되지 않았습니다. 관리자에게 문의하세요.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [clubId]);
+      })();
+    } else {
+      // 클럽 목록 모드
+      (async () => {
+        try {
+          const [c, s] = await Promise.all([getClub(clubId), getSessions(clubId)]);
+          if (!c) {
+            setError('공개 접근이 설정되지 않았습니다. 관리자에게 문의하세요.');
+            return;
+          }
+          setClub(c);
+          setSessions(s.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        } catch {
+          setError('공개 접근이 설정되지 않았습니다. 관리자에게 문의하세요.');
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }
+  }, [clubId, sessionId, isDirectSessionLink]);
 
   const handleSelectSession = async (session: Session) => {
     setSelectedSession(session);
@@ -120,6 +258,19 @@ export default function PublicClubPage() {
           </p>
         </div>
       </div>
+    );
+  }
+
+  // 직접 세션 링크 → 간소화 보기
+  if (isDirectSessionLink && selectedSession) {
+    return (
+      <SimpleSessionView
+        session={selectedSession}
+        matches={sessionMatches}
+        groups={sessionGroups}
+        clubName={club.name}
+        clubColor={club.color ?? '#15803d'}
+      />
     );
   }
 
@@ -196,7 +347,7 @@ export default function PublicClubPage() {
       {/* Header */}
       <header className="text-white shadow-md" style={{ backgroundColor: club.color ?? '#15803d' }}>
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <span className="text-xl font-bold tracking-tight">🎾 {club.name}</span>
+          <span className="text-xl font-bold tracking-tight">{club.name}</span>
           <span className="text-xs text-green-100 opacity-80">공개 대진표</span>
         </div>
       </header>
@@ -233,7 +384,7 @@ export default function PublicClubPage() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                           s.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
                         }`}>
-                          {s.type === 'quarterly' ? '🏆 분기대회' : '주간 경기'}
+                          {s.type === 'quarterly' ? '분기대회' : '주간 경기'}
                         </span>
                         {s.isConfirmed && (
                           <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
@@ -278,7 +429,7 @@ export default function PublicClubPage() {
                   <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
                     selectedSession.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
                   }`}>
-                    {selectedSession.type === 'quarterly' ? '🏆 분기대회' : '주간 경기'}
+                    {selectedSession.type === 'quarterly' ? '분기대회' : '주간 경기'}
                   </span>
                   {selectedSession.isConfirmed && (
                     <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
