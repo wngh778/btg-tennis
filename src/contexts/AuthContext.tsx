@@ -113,20 +113,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mounted) setLoading(false);
     });
 
-    // 3) 탭 복귀 시 세션 자동 갱신
-    //    브라우저 탭이 비활성→활성 전환 시 Supabase 세션을 강제 갱신
-    //    이렇게 하면 방치 후 돌아와도 토큰이 유효한 상태로 API 호출 가능
+    // 3) 탭 복귀 시 자동 새로고침
+    //    브라우저가 백그라운드 탭을 freeze하면 Supabase 클라이언트의 내부 상태(토큰 갱신,
+    //    Promise 체인 등)가 꼬여서 모든 API 호출이 멈출 수 있음.
+    //    2분 이상 비활성이었으면 페이지를 완전히 새로고침하여 깨끗한 상태로 시작.
+    let lastActiveTime = Date.now();
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && userRef.current) {
-        // getSession()은 내부적으로 만료 여부를 확인하고 필요 시 토큰 갱신
-        supabase.auth.getSession().then(({ data: { session } }) => {
-          if (mounted && session?.user) {
-            setUserWithRef(session.user);
-          }
-        }).catch(() => {
-          // 갱신 실패해도 기존 상태 유지
-        });
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - lastActiveTime;
+        if (elapsed > 2 * 60 * 1000 && userRef.current) {
+          window.location.reload();
+          return;
+        }
       }
+      lastActiveTime = Date.now();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
