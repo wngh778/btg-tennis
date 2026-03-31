@@ -8,10 +8,14 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const fetchWithTimeout: typeof fetch = (input, init) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
-  const signal = init?.signal
-    ? init.signal // 이미 signal이 있으면 그것을 사용
-    : controller.signal;
-  return fetch(input, { ...init, signal }).finally(() => clearTimeout(timeout));
+
+  // 기존 signal이 있으면 그것도 감시하여 abort 전파
+  if (init?.signal) {
+    init.signal.addEventListener('abort', () => controller.abort());
+  }
+
+  return fetch(input, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(timeout));
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

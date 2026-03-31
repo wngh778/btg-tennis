@@ -108,17 +108,6 @@ export default function SessionDetailPage() {
   // auth 초기화 완료 후에만 데이터 로드 (새로고침 시 세션 미초기화 상태에서 쿼리 실행 방지)
   useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
 
-  // 탭 복귀 시 데이터 재로드 (방치 후 토큰 만료 대응)
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !authLoading && id) {
-        load();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [load, authLoading, id]);
-
   // 조별경기: 그룹 로드 후 내 그룹 자동 선택
   useEffect(() => {
     if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {

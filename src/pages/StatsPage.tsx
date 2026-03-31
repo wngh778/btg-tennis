@@ -182,13 +182,7 @@ export default function StatsPage() {
     };
 
     load();
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !cancelled) load();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', handleVisibility); };
+    return () => { cancelled = true; };
   }, [clubId, loadingClubs, currentClub, computeStats, retryCount]);
 
   // 세션 타입 + 날짜 범위로 필터된 세션 목록

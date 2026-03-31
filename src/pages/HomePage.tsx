@@ -62,16 +62,7 @@ export default function HomePage() {
     };
 
     loadSessions();
-
-    // 탭 복귀 시 데이터 재로드
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !cancelled) {
-        loadSessions();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', handleVisibility); };
+    return () => { cancelled = true; };
   }, [clubId, loadingClubs, currentClub]);
 
   return (

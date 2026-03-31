@@ -367,14 +367,7 @@ export default function SessionsPage() {
     }
   };
 
-  useEffect(() => {
-    if (!authLoading && !loadingClubs) load();
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !authLoading && !loadingClubs) load();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [authLoading, loadingClubs, clubId]);
+  useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, clubId]);
 
   const handleDelete = async (id: string, date: string, title?: string | null) => {
     const label = title ?? formatDate(date);

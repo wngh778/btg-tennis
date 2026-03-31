@@ -115,12 +115,6 @@ export default function MembersPage() {
   useEffect(() => {
     if (!authLoading && !loadingClubs && isAdminUser) load();
     else if (!authLoading && !loadingClubs) setLoading(false);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !authLoading && !loadingClubs && isAdminUser) load();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [authLoading, loadingClubs, isAdminUser, clubId]);
 
   if (!isAdminUser && !authLoading) {
