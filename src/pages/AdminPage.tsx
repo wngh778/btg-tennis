@@ -47,9 +47,14 @@ export default function AdminPage() {
   const load = async () => {
     if (!currentClub) return;
     setLoadingData(true);
-    const users = await getClubUsers(currentClub.id);
-    setAppUsers(users);
-    setLoadingData(false);
+    try {
+      const users = await getClubUsers(currentClub.id);
+      setAppUsers(users);
+    } catch (e) {
+      console.error('load users error:', e);
+    } finally {
+      setLoadingData(false);
+    }
   };
 
   useEffect(() => { if (currentClub) load(); }, [currentClub]);

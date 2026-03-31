@@ -1248,27 +1248,26 @@ export default function SessionDetailPage() {
       })()}
 
       {/* Generate Settings Modal */}
-      {/* 간소화 보기 */}
+      {/* 간소화 보기 - 캡처 최적화 */}
       {showSimpleView && (
         <div className="fixed inset-0 bg-white z-50 flex flex-col">
           {/* 헤더 */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 shrink-0">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 shrink-0">
             <button
               onClick={() => setShowSimpleView(false)}
               className="text-blue-600 text-sm font-medium"
             >
               닫기
             </button>
-            <span className="font-bold text-slate-800 text-base">
+            <span className="font-bold text-slate-800 text-sm">
               {session.title ?? formatDate(session.date)}
             </span>
             <div className="w-10" />
           </div>
 
-          {/* 경기 목록 */}
+          {/* 경기 목록 - 초밀집 레이아웃 */}
           <div className="flex-1 overflow-y-auto">
             {session.gameMode === 'group' && groups.length > 0 ? (
-              // 조별 경기 표시
               groups.map(group => {
                 const groupMatches = [...matches]
                   .filter(m => m.groupId === group.id)
@@ -1282,27 +1281,22 @@ export default function SessionDetailPage() {
                 };
                 return (
                   <div key={group.id}>
-                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
-                      <span className="font-bold text-slate-700 text-sm">{group.name}</span>
+                    <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
+                      <span className="font-bold text-slate-700 text-xs">{group.name}</span>
                     </div>
                     {groupMatches.map(m => (
-                      <div key={m.id} className="flex items-center px-4 py-3 border-b border-slate-100">
-                        <span className="flex-1 text-sm text-slate-700">
-                          {pLabel(m.team1.player1)}, {pLabel(m.team1.player2)}
+                      <div key={m.id} className="flex items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                        <span className="flex-1 text-slate-700 truncate">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
+                        <span className="font-bold text-slate-800 px-1.5 shrink-0 tabular-nums">
+                          {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
                         </span>
-                        <span className="text-sm font-bold text-slate-800 px-3 shrink-0">
-                          {m.isCompleted ? `${m.score1} vs ${m.score2}` : 'vs'}
-                        </span>
-                        <span className="flex-1 text-sm text-slate-700 text-right">
-                          {pLabel(m.team2.player1)}, {pLabel(m.team2.player2)}
-                        </span>
+                        <span className="flex-1 text-slate-700 text-right truncate">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
                       </div>
                     ))}
                   </div>
                 );
               })
             ) : (
-              // 일반 경기 표시 (라운드별)
               (() => {
                 const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
                 return rounds.map(round => {
@@ -1311,20 +1305,16 @@ export default function SessionDetailPage() {
                     .sort((a, b) => a.court - b.court);
                   return (
                     <div key={round}>
-                      <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
-                        <span className="font-bold text-slate-700 text-sm">{round}라운드</span>
+                      <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
+                        <span className="font-bold text-slate-700 text-xs">{round}R</span>
                       </div>
                       {roundMatches.map(m => (
-                        <div key={m.id} className="flex items-center px-4 py-3 border-b border-slate-100">
-                          <span className="flex-1 text-sm text-slate-700">
-                            {m.team1.player1.name}, {m.team1.player2.name}
+                        <div key={m.id} className="flex items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
+                          <span className="flex-1 text-slate-700 truncate">{m.team1.player1.name} {m.team1.player2.name}</span>
+                          <span className="font-bold text-slate-800 px-1.5 shrink-0 tabular-nums">
+                            {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
                           </span>
-                          <span className="text-sm font-bold text-slate-800 px-3 shrink-0">
-                            {m.isCompleted ? `${m.score1} vs ${m.score2}` : 'vs'}
-                          </span>
-                          <span className="flex-1 text-sm text-slate-700 text-right">
-                            {m.team2.player1.name}, {m.team2.player2.name}
-                          </span>
+                          <span className="flex-1 text-slate-700 text-right truncate">{m.team2.player1.name} {m.team2.player2.name}</span>
                         </div>
                       ))}
                     </div>
@@ -1334,11 +1324,11 @@ export default function SessionDetailPage() {
             )}
           </div>
 
-          {/* 하단 닫기 버튼 */}
-          <div className="px-4 py-4 border-t border-slate-200 shrink-0">
+          {/* 하단 닫기 */}
+          <div className="px-3 py-2 border-t border-slate-200 shrink-0">
             <button
               onClick={() => setShowSimpleView(false)}
-              className="w-full py-3 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors"
+              className="w-full py-2 rounded-xl border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors"
             >
               닫기
             </button>
