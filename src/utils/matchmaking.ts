@@ -63,7 +63,7 @@ function getOpponentCount(history: PlayerHistory, id1: string, id2: string): num
 }
 
 function pairScore(history: PlayerHistory, p1: Player, p2: Player): number {
-  const partnerPenalty = getPartnerCount(history, p1.id, p2.id) * 3;
+  const partnerPenalty = getPartnerCount(history, p1.id, p2.id) * 10000;
   const ntrpDiff = Math.abs(p1.ntrp - p2.ntrp);
   return partnerPenalty + ntrpDiff;
 }
@@ -131,7 +131,7 @@ function generateSameGenderRound(
   let bestScore = Infinity;
   let bestMatches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
 
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     const shuffled = shuffle(playing);
     const matches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
     let totalScore = 0;
@@ -169,7 +169,7 @@ function generateMixedRound(
   let bestScore = Infinity;
   let bestMatches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
 
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     const shuffledM = shuffle(malesPlaying);
     const shuffledF = shuffle(femalesPlaying);
     const matches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];

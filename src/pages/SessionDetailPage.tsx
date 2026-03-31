@@ -457,17 +457,17 @@ export default function SessionDetailPage() {
       isCompleted: false,
     });
 
-    // 5라운드: A(Y+companion): R1,R2,skip R3,R4,R5 | B: R1,skip R2,R3,R4,skip R5 | C: skip R1,R2,R3,skip R4,R5
-    // 6라운드: A: R1,R2,skip R3,R4,R5,skip R6 | B: R1,skip R2,R3,R4,skip R5,R6 | C: skip R1,R2,R3,skip R4,R5,R6
+    // 6명 라운드 로빈: 12슬롯에 12개 고유 페어 배치 (중복 페어 없음)
+    // 휴식: R1,R4=C조 / R2,R5=B조 / R3,R6=A조
     const generated: Omit<Match, 'id'>[] = [
-      mk(1, Y, companion, B1, B2),     // A vs B
-      mk(2, Y, companion, C1, C2),     // A vs C
-      mk(3, B1, C1, B2, C2),           // B vs C
-      mk(4, Y, B1, companion, B2),     // A+B mix
-      mk(5, Y, C1, companion, C2),     // A+C mix
+      mk(1, Y, companion, B1, B2),     // A vs B (휴식: C1,C2)
+      mk(2, Y, C1, companion, C2),     // A+C mix (휴식: B1,B2)
+      mk(3, B1, C1, B2, C2),           // B+C mix (휴식: Y,P)
+      mk(4, Y, B1, companion, B2),     // A+B mix (휴식: C1,C2)
+      mk(5, Y, C2, companion, C1),     // A+C mix alt (휴식: B1,B2)
     ];
     if (mondayRounds >= 6) {
-      generated.push(mk(6, B1, C2, B2, C1)); // B vs C (다른 팀 조합)
+      generated.push(mk(6, B1, C2, B2, C1)); // B+C mix alt (휴식: Y,P)
     }
 
     await saveMatches(session!.id, generated);

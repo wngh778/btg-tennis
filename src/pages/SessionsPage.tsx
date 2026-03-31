@@ -445,59 +445,61 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-      <div className="p-5 flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold text-slate-800">
-              {session.title ?? formatDate(session.date)}
-            </span>
-            {session.title && (
-              <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
-            )}
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-              session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-            }`}>
-              {session.type === 'quarterly' ? '분기대회' : '주간'}
-            </span>
-            {session.gameMode === 'group' && (
-              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">조별경기</span>
-            )}
-            {session.isGenerated && (
-              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">대진 완료</span>
+      <div className="p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1">
+              <span className="font-semibold text-slate-800 text-sm sm:text-base">
+                {session.title ?? formatDate(session.date)}
+              </span>
+              {session.title && (
+                <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
+              )}
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+              }`}>
+                {session.type === 'quarterly' ? '분기대회' : '주간'}
+              </span>
+              {session.gameMode === 'group' && (
+                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">조별경기</span>
+              )}
+              {session.isGenerated && (
+                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">대진 완료</span>
+              )}
+            </div>
+            <p className="text-slate-500 text-xs sm:text-sm">
+              {session.courts}코트 · {session.rounds}라운드
+              {session.type === 'weekly' && session.mixedRounds > 0 ? ` · 혼복 ${session.mixedRounds}R` : ''}
+              {session.votingDeadline
+                ? <>{' · 투표 마감: '}{new Date(session.votingDeadline).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short' })}{isVotingClosed && !isPast && <span className="ml-1 text-orange-500">(마감)</span>}</>
+                : <span className="ml-1 text-green-600"> · 투표 마감 없음</span>
+              }
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Link
+              to={`/sessions/${session.id}`}
+              className="px-3 py-1.5 bg-green-600 text-white text-xs sm:text-sm rounded-lg hover:bg-green-700 transition-colors"
+            >
+              보기
+            </Link>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => setEditing(v => !v)}
+                  className={`px-2 py-1.5 text-xs sm:text-sm rounded-lg transition-colors ${editing ? 'bg-slate-200 text-slate-700' : 'text-blue-500 hover:text-blue-700'}`}
+                >
+                  수정
+                </button>
+                <button
+                  onClick={() => onDelete(session.id, session.date, session.title)}
+                  className="px-2 py-1.5 text-red-400 hover:text-red-600 text-xs sm:text-sm"
+                >
+                  삭제
+                </button>
+              </>
             )}
           </div>
-          <p className="text-slate-500 text-sm">
-            {session.courts}코트 · {session.rounds}라운드
-            {session.type === 'weekly' && session.mixedRounds > 0 ? ` · 혼복 ${session.mixedRounds}R` : ''}
-            {session.votingDeadline
-              ? <>{' · 투표 마감: '}{new Date(session.votingDeadline).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short' })}{isVotingClosed && !isPast && <span className="ml-1 text-orange-500">(마감)</span>}</>
-              : <span className="ml-1 text-green-600"> · 투표 마감 없음</span>
-            }
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to={`/sessions/${session.id}`}
-            className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors"
-          >
-            보기
-          </Link>
-          {isAdmin && (
-            <>
-              <button
-                onClick={() => setEditing(v => !v)}
-                className={`px-3 py-2 text-sm rounded-lg transition-colors ${editing ? 'bg-slate-200 text-slate-700' : 'text-blue-500 hover:text-blue-700'}`}
-              >
-                수정
-              </button>
-              <button
-                onClick={() => onDelete(session.id, session.date, session.title)}
-                className="px-3 py-2 text-red-400 hover:text-red-600 text-sm"
-              >
-                삭제
-              </button>
-            </>
-          )}
         </div>
       </div>
       {editing && (
