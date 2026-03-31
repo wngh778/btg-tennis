@@ -353,10 +353,12 @@ export default function SessionsPage() {
   const { isAdminUser, loading: authLoading } = useAuth();
   const { currentClub, loadingClubs } = useClub();
 
+  const clubId = currentClub?.id;
+
   const load = async () => {
-    if (!currentClub) { setLoading(false); return; }
+    if (!clubId) { setLoading(false); return; }
     try {
-      const data = await getSessions(currentClub.id);
+      const data = await getSessions(clubId);
       setSessions(data);
     } catch (e) {
       console.error('sessions load error:', e);
@@ -365,7 +367,7 @@ export default function SessionsPage() {
     }
   };
 
-  useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, currentClub]);
+  useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, clubId]);
 
   const handleDelete = async (id: string, date: string, title?: string | null) => {
     const label = title ?? formatDate(date);

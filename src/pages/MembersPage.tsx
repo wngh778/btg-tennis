@@ -98,10 +98,12 @@ export default function MembersPage() {
   const { isAdminUser, loading: authLoading } = useAuth();
   const { currentClub, loadingClubs } = useClub();
 
+  const clubId = currentClub?.id;
+
   const load = async () => {
-    if (!currentClub) { setLoading(false); return; }
+    if (!clubId) { setLoading(false); return; }
     try {
-      const data = await getMembers(currentClub.id);
+      const data = await getMembers(clubId);
       setMembers(data);
     } catch (e) {
       console.error('members load error:', e);
@@ -113,7 +115,7 @@ export default function MembersPage() {
   useEffect(() => {
     if (!authLoading && !loadingClubs && isAdminUser) load();
     else if (!authLoading && !loadingClubs) setLoading(false);
-  }, [authLoading, loadingClubs, isAdminUser, currentClub]);
+  }, [authLoading, loadingClubs, isAdminUser, clubId]);
 
   if (!isAdminUser && !authLoading) {
     return <div className="text-center py-16 text-slate-500">접근 권한이 없습니다.</div>;

@@ -11,14 +11,20 @@ export default function HomePage() {
   const [pastSessions, setPastSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const clubId = currentClub?.id;
+
   useEffect(() => {
-    if (loadingClubs || !currentClub) {
+    let cancelled = false;
+
+    if (!clubId) {
       if (!loadingClubs) setLoading(false);
       return;
     }
+
     setLoading(true);
-    getSessions(currentClub.id)
+    getSessions(clubId)
       .then(sessions => {
+        if (cancelled) return;
         const today = new Date().toISOString().split('T')[0];
         const upcoming = sessions
           .filter(s => s.date >= today)
@@ -29,9 +35,15 @@ export default function HomePage() {
         setUpcomingSession(upcoming);
         setPastSessions(past);
       })
-      .catch(err => console.error('getSessions error:', err))
-      .finally(() => setLoading(false));
-  }, [currentClub, loadingClubs]);
+      .catch(err => {
+        if (!cancelled) console.error('getSessions error:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [clubId, loadingClubs]);
 
   return (
     <div className="space-y-6">
