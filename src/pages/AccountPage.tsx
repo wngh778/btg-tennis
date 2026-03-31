@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { useNavigate } from 'react-router-dom';
@@ -16,11 +16,14 @@ export default function AccountPage() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!loading && (!user || !appUser)) {
+      navigate('/login');
+    }
+  }, [loading, user, appUser, navigate]);
+
   if (loading) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
-  if (!user || !appUser) {
-    navigate('/login');
-    return null;
-  }
+  if (!user || !appUser) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

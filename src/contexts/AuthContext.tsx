@@ -98,7 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // SIGNED_IN에서만 appUser 로드
+        // INITIAL_SESSION: getSession()이 처리하므로 여기서는 loading 유지
+        // (appUser 로드 전에 loading=false가 되면 페이지가 "불러오는 중..." 상태에서 빠져나감)
+        if (event === 'INITIAL_SESSION') {
+          return;
+        }
+
+        // SIGNED_IN에서 appUser 로드
         if (event === 'SIGNED_IN') {
           await loadAppUser(session.user.id);
         }
