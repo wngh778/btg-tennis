@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
@@ -21,12 +21,14 @@ interface CachedData {
   playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>;
   attendanceCounts: Map<string, number>;
   memberIds: Set<string>;
+  sessions: Session[];
 }
+
+type SessionTypeFilter = 'all' | 'weekly' | 'quarterly';
 
 export default function StatsPage() {
   const { appUser, isAdminUser } = useAuth();
   const { currentClub, loadingClubs } = useClub();
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,15 +36,26 @@ export default function StatsPage() {
   const [showGuests, setShowGuests] = useState(false);
   const cachedData = useRef<CachedData | null>(null);
 
-  const computeStats = (
+  // 필터 상태
+  const [sessionTypeFilter, setSessionTypeFilter] = useState<SessionTypeFilter>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+
+  const computeStats = useCallback((
     allMatches: Match[],
     playerInfo: Map<string, { name: string; gender: 'male' | 'female' }>,
     attendanceCounts: Map<string, number>,
-    sessionId: string
+    sessionId: string,
+    filteredSessionIds?: Set<string>
   ) => {
-    const filtered = sessionId === 'all'
-      ? allMatches
-      : allMatches.filter(m => m.sessionId === sessionId);
+    let filtered: Match[];
+    if (sessionId !== 'all') {
+      filtered = allMatches.filter(m => m.sessionId === sessionId);
+    } else if (filteredSessionIds) {
+      filtered = allMatches.filter(m => filteredSessionIds.has(m.sessionId));
+    } else {
+      filtered = allMatches;
+    }
 
     const statMap = new Map<string, PlayerStat>();
 
@@ -87,7 +100,7 @@ export default function StatsPage() {
       }
     });
 
-    if (sessionId === 'all') {
+    if (sessionId === 'all' && !filteredSessionIds) {
       attendanceCounts.forEach((count, playerId) => {
         if (!statMap.has(playerId)) {
           const info = playerInfo.get(playerId);
@@ -108,52 +121,158 @@ export default function StatsPage() {
     });
 
     setStats(result);
-  };
+  }, []);
 
-  const fetchData = async () => {
-    if (!currentClub) { setLoading(false); return; }
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const [allMatches, members, allSessions, allAttendance] = await Promise.all([
-        getAllMatches(currentClub.id),
-        getMembers(currentClub.id),
-        getSessions(currentClub.id),
-        getAllAttendance(currentClub.id),
-      ]);
+  // currentClub?.id를 추적하여 안정적인 의존성 관리
+  const clubId = currentClub?.id;
+  const [retryCount, setRetryCount] = useState(0);
 
-      setSessions(allSessions);
+  useEffect(() => {
+    let cancelled = false;
 
-      const playerInfo = new Map<string, { name: string; gender: 'male' | 'female' }>();
-      members.forEach(m => playerInfo.set(m.id, { name: m.name, gender: m.gender }));
-      allMatches.forEach(m => {
-        [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2].forEach(p => {
-          if (!playerInfo.has(p.id)) playerInfo.set(p.id, { name: p.name, gender: p.gender });
+    const load = async () => {
+      if (!clubId || !currentClub) {
+        if (!loadingClubs) setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setLoadError(false);
+
+      try {
+        const [allMatches, members, allSessions, allAttendance] = await Promise.all([
+          getAllMatches(clubId),
+          getMembers(clubId),
+          getSessions(clubId),
+          getAllAttendance(clubId),
+        ]);
+
+        if (cancelled) return;
+
+        const playerInfo = new Map<string, { name: string; gender: 'male' | 'female' }>();
+        members.forEach(m => playerInfo.set(m.id, { name: m.name, gender: m.gender }));
+        allMatches.forEach(m => {
+          [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2].forEach(p => {
+            if (!playerInfo.has(p.id)) playerInfo.set(p.id, { name: p.name, gender: p.gender });
+          });
         });
-      });
 
-      const attendanceCounts = new Map<string, number>();
-      allAttendance.forEach(a => {
-        attendanceCounts.set(a.playerId, (attendanceCounts.get(a.playerId) ?? 0) + 1);
-      });
+        const attendanceCounts = new Map<string, number>();
+        allAttendance.forEach(a => {
+          attendanceCounts.set(a.playerId, (attendanceCounts.get(a.playerId) ?? 0) + 1);
+        });
 
-      const memberIds = new Set(members.map(m => m.id));
-      cachedData.current = { allMatches, playerInfo, attendanceCounts, memberIds };
-      computeStats(allMatches, playerInfo, attendanceCounts, 'all');
-    } catch (e) {
-      console.error('stats load error:', e);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
+        const memberIds = new Set(members.map(m => m.id));
+        cachedData.current = { allMatches, playerInfo, attendanceCounts, memberIds, sessions: allSessions };
+
+        // 필터 초기화
+        setSelectedSessionId('all');
+        setSessionTypeFilter('all');
+        setDateFrom('');
+        setDateTo('');
+
+        computeStats(allMatches, playerInfo, attendanceCounts, 'all');
+      } catch (e) {
+        if (cancelled) return;
+        console.error('stats load error:', e);
+        setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [clubId, loadingClubs, currentClub, computeStats, retryCount]);
+
+  // 세션 타입 + 날짜 범위로 필터된 세션 목록
+  const filteredSessions = useMemo(() => {
+    if (!cachedData.current) return [];
+    let sessions = cachedData.current.sessions;
+
+    if (sessionTypeFilter !== 'all') {
+      sessions = sessions.filter(s => s.type === sessionTypeFilter);
     }
-  };
+    if (dateFrom) {
+      sessions = sessions.filter(s => s.date >= dateFrom);
+    }
+    if (dateTo) {
+      sessions = sessions.filter(s => s.date <= dateTo);
+    }
 
-  useEffect(() => { if (!loadingClubs) fetchData(); }, [loadingClubs, currentClub]);
+    return sessions;
+  }, [cachedData.current?.sessions, sessionTypeFilter, dateFrom, dateTo]);
+
+  // 필터가 활성화되어 있는지 여부
+  const hasActiveFilter = sessionTypeFilter !== 'all' || dateFrom !== '' || dateTo !== '';
+
+  // 필터 변경 시 통계 재계산
+  const recomputeWithFilters = useCallback((
+    sessionId: string,
+    typeFilter: SessionTypeFilter,
+    from: string,
+    to: string,
+  ) => {
+    if (!cachedData.current) return;
+    const { allMatches, playerInfo, attendanceCounts, sessions } = cachedData.current;
+
+    if (sessionId !== 'all') {
+      computeStats(allMatches, playerInfo, attendanceCounts, sessionId);
+      return;
+    }
+
+    // 필터가 없으면 전체
+    const hasFilter = typeFilter !== 'all' || from !== '' || to !== '';
+    if (!hasFilter) {
+      computeStats(allMatches, playerInfo, attendanceCounts, 'all');
+      return;
+    }
+
+    // 필터된 세션 ID 집합
+    let filtered = sessions;
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(s => s.type === typeFilter);
+    }
+    if (from) {
+      filtered = filtered.filter(s => s.date >= from);
+    }
+    if (to) {
+      filtered = filtered.filter(s => s.date <= to);
+    }
+    const sessionIds = new Set(filtered.map(s => s.id));
+    computeStats(allMatches, playerInfo, attendanceCounts, 'all', sessionIds);
+  }, [computeStats]);
 
   const handleSessionChange = (sessionId: string) => {
     setSelectedSessionId(sessionId);
+    recomputeWithFilters(sessionId, sessionTypeFilter, dateFrom, dateTo);
+  };
+
+  const handleTypeFilterChange = (type: SessionTypeFilter) => {
+    setSessionTypeFilter(type);
+    setSelectedSessionId('all');
+    recomputeWithFilters('all', type, dateFrom, dateTo);
+  };
+
+  const handleDateFromChange = (val: string) => {
+    setDateFrom(val);
+    setSelectedSessionId('all');
+    recomputeWithFilters('all', sessionTypeFilter, val, dateTo);
+  };
+
+  const handleDateToChange = (val: string) => {
+    setDateTo(val);
+    setSelectedSessionId('all');
+    recomputeWithFilters('all', sessionTypeFilter, dateFrom, val);
+  };
+
+  const handleResetFilters = () => {
+    setSessionTypeFilter('all');
+    setDateFrom('');
+    setDateTo('');
+    setSelectedSessionId('all');
     if (cachedData.current) {
-      computeStats(cachedData.current.allMatches, cachedData.current.playerInfo, cachedData.current.attendanceCounts, sessionId);
+      computeStats(cachedData.current.allMatches, cachedData.current.playerInfo, cachedData.current.attendanceCounts, 'all');
     }
   };
 
@@ -190,19 +309,78 @@ export default function StatsPage() {
         </div>
       )}
 
-      {/* Session filter */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-        <label className="block text-sm font-medium text-slate-700 mb-2">경기 일정 필터</label>
-        <select
-          value={selectedSessionId}
-          onChange={e => handleSessionChange(e.target.value)}
-          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-        >
-          <option value="all">전체</option>
-          {sessions.map(s => (
-            <option key={s.id} value={s.id}>{formatDate(s.date)}</option>
-          ))}
-        </select>
+      {/* 필터 영역 */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-semibold text-slate-700">필터</label>
+          {hasActiveFilter && (
+            <button
+              onClick={handleResetFilters}
+              className="text-xs text-green-600 hover:text-green-700 font-medium"
+            >
+              필터 초기화
+            </button>
+          )}
+        </div>
+
+        {/* 세션 타입 필터 */}
+        <div>
+          <label className="block text-xs text-slate-500 mb-1.5">대회 유형</label>
+          <div className="flex gap-2">
+            {([['all', '전체'], ['weekly', '주간'], ['quarterly', '분기대회']] as const).map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => handleTypeFilterChange(val)}
+                className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                  sessionTypeFilter === val
+                    ? 'bg-green-600 text-white border-green-600'
+                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 날짜 범위 필터 */}
+        <div>
+          <label className="block text-xs text-slate-500 mb-1.5">기간</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => handleDateFromChange(e.target.value)}
+              className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <span className="text-slate-400 text-sm">~</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => handleDateToChange(e.target.value)}
+              className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+        </div>
+
+        {/* 세션 드롭다운 */}
+        <div>
+          <label className="block text-xs text-slate-500 mb-1.5">경기 일정</label>
+          <select
+            value={selectedSessionId}
+            onChange={e => handleSessionChange(e.target.value)}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          >
+            <option value="all">전체{hasActiveFilter ? ` (${filteredSessions.length}개 일정)` : ''}</option>
+            {filteredSessions.map(s => (
+              <option key={s.id} value={s.id}>
+                {formatDate(s.date)}
+                {s.type === 'quarterly' ? ' [분기대회]' : ''}
+                {s.title ? ` - ${s.title}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Stats table */}
@@ -222,12 +400,14 @@ export default function StatsPage() {
         ) : loadError ? (
           <div className="text-center py-10">
             <p className="text-slate-500 mb-3">불러오기 실패</p>
-            <button onClick={fetchData} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
+            <button onClick={() => setRetryCount(c => c + 1)} className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700">
               다시 시도
             </button>
           </div>
         ) : stats.length === 0 ? (
-          <div className="text-center py-10 text-slate-400">완료된 경기가 없습니다.</div>
+          <div className="text-center py-10 text-slate-400">
+            {hasActiveFilter ? '필터 조건에 맞는 경기가 없습니다.' : '완료된 경기가 없습니다.'}
+          </div>
         ) : (
           <div className="scrollable-box overflow-x-auto" style={{ maxHeight: '400px' }}>
             <table className="w-full text-sm">
