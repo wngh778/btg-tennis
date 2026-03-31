@@ -19,6 +19,7 @@ function rowToClub(row: Record<string, unknown>): Club {
     defaultCourts: row.default_courts as number,
     color: (row.color as string) ?? '#15803d',
     dayOfWeek: (row.day_of_week as string) ?? '일요일',
+    autoCreateSession: (row.auto_create_session as boolean) ?? false,
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -66,12 +67,13 @@ export async function addClub(data: { name: string; defaultCourts: number; color
   return inserted.id;
 }
 
-export async function updateClub(id: string, data: Partial<{ name: string; defaultCourts: number; color: string; dayOfWeek: string }>): Promise<void> {
+export async function updateClub(id: string, data: Partial<{ name: string; defaultCourts: number; color: string; dayOfWeek: string; autoCreateSession: boolean }>): Promise<void> {
   const update: Record<string, unknown> = {};
   if (data.name !== undefined) update.name = data.name;
   if (data.defaultCourts !== undefined) update.default_courts = data.defaultCourts;
   if (data.color !== undefined) update.color = data.color;
   if (data.dayOfWeek !== undefined) update.day_of_week = data.dayOfWeek;
+  if (data.autoCreateSession !== undefined) update.auto_create_session = data.autoCreateSession;
   const { error } = await supabase.from('clubs').update(update).eq('id', id);
   if (error) throw error;
 }

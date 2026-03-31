@@ -16,6 +16,7 @@ export default function AdminPage() {
   // Club settings
   const [clubName, setClubName] = useState('');
   const [clubCourts, setClubCourts] = useState(4);
+  const [autoCreate, setAutoCreate] = useState(false);
   const [clubSaving, setClubSaving] = useState(false);
   const [clubSaved, setClubSaved] = useState(false);
 
@@ -41,6 +42,7 @@ export default function AdminPage() {
     if (currentClub) {
       setClubName(currentClub.name);
       setClubCourts(currentClub.defaultCourts);
+      setAutoCreate(currentClub.autoCreateSession);
     }
   }, [currentClub]);
 
@@ -64,7 +66,7 @@ export default function AdminPage() {
     if (!currentClub) return;
     setClubSaving(true);
     try {
-      await updateClub(currentClub.id, { name: clubName, defaultCourts: clubCourts });
+      await updateClub(currentClub.id, { name: clubName, defaultCourts: clubCourts, autoCreateSession: autoCreate });
       setClubSaved(true);
       setTimeout(() => setClubSaved(false), 2000);
     } finally {
@@ -216,7 +218,21 @@ export default function AdminPage() {
               </select>
             </div>
           </div>
-          <div className="flex justify-end items-center gap-3">
+          <div className="mt-3">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoCreate}
+                onChange={e => setAutoCreate(e.target.checked)}
+                className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+              />
+              <div>
+                <span className="text-sm font-medium text-slate-700">자동 경기 생성</span>
+                <p className="text-xs text-slate-400">지난 경기 이후 자동으로 다음 주 경기를 생성합니다</p>
+              </div>
+            </label>
+          </div>
+          <div className="flex justify-end items-center gap-3 mt-3">
             {clubSaved && <span className="text-green-600 text-sm">저장됨</span>}
             <button
               type="submit"

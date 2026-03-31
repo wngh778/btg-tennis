@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { getSessions, addSession, updateSession, deleteSession, addSessionGroup } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { getNextSunday } from '../utils/matchmaking';
+import { getNextDay } from '../utils/matchmaking';
 import type { Session, SessionType, GameMode } from '../types';
 import { formatDate } from '../utils/formatting';
 
@@ -274,7 +274,7 @@ function SessionForm({
 
 function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => void; onCancel: () => void; defaultCourts: number }) {
   const { currentClub } = useClub();
-  const nextSunday = getNextSunday();
+  const nextDay = getNextDay(currentClub?.dayOfWeek ?? '일요일');
 
   const handleSubmit = async (values: Parameters<React.ComponentProps<typeof SessionForm>['onSubmit']>[0]) => {
     if (!currentClub) return;
@@ -298,7 +298,7 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
   return (
     <SessionForm
       initialValues={{
-        date: nextSunday,
+        date: nextDay,
         title: null,
         type: 'weekly',
         gameMode: 'normal',
@@ -306,7 +306,7 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
         courts: defaultCourts,
         rounds: 6,
         mixedRounds: 2,
-        votingDeadline: new Date(`${getDefaultDeadlineDate(nextSunday)}T23:59:00`).toISOString(),
+        votingDeadline: new Date(`${getDefaultDeadlineDate(nextDay)}T23:59:00`).toISOString(),
         trackLate: false,
       }}
       onSubmit={handleSubmit}

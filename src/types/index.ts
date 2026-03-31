@@ -6,6 +6,7 @@ export interface Club {
   defaultCourts: number;
   color: string;
   dayOfWeek: string;
+  autoCreateSession: boolean;
   createdAt: Date;
 }
 

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getSessions } from '../lib/database';
 import { useClub } from '../contexts/ClubContext';
+import { checkAndAutoCreateSession } from '../utils/autoSession';
 import type { Session } from '../types';
 import { formatDate } from '../utils/formatting';
 
@@ -10,40 +11,59 @@ export default function HomePage() {
   const [upcomingSession, setUpcomingSession] = useState<Session | null>(null);
   const [pastSessions, setPastSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const autoCreateTriedRef = useRef<string | null>(null);
 
   const clubId = currentClub?.id;
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!clubId) {
+    if (!clubId || !currentClub) {
       if (!loadingClubs) setLoading(false);
       return;
     }
 
     setLoading(true);
-    getSessions(clubId)
-      .then(sessions => {
+
+    const loadSessions = async () => {
+      try {
+        let sessions = await getSessions(clubId);
         if (cancelled) return;
+
         const today = new Date().toISOString().split('T')[0];
-        const upcoming = sessions
+        let upcoming = sessions
           .filter(s => s.date >= today)
           .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
-        const past = sessions
-          .filter(s => s.date < today)
-          .sort((a, b) => b.date.localeCompare(a.date));
-        setUpcomingSession(upcoming);
-        setPastSessions(past);
-      })
-      .catch(err => {
-        if (!cancelled) console.error('getSessions error:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
 
+        // 자동 생성: 예정 세션이 없고, 이 클럽에 대해 아직 시도하지 않았으면 실행
+        if (!upcoming && currentClub.autoCreateSession && autoCreateTriedRef.current !== clubId) {
+          autoCreateTriedRef.current = clubId;
+          const newId = await checkAndAutoCreateSession(currentClub);
+          if (newId && !cancelled) {
+            sessions = await getSessions(clubId);
+            if (cancelled) return;
+            upcoming = sessions
+              .filter(s => s.date >= today)
+              .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+          }
+        }
+
+        if (!cancelled) {
+          setUpcomingSession(upcoming);
+          setPastSessions(
+            sessions.filter(s => s.date < today).sort((a, b) => b.date.localeCompare(a.date))
+          );
+        }
+      } catch (err) {
+        if (!cancelled) console.error('getSessions error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadSessions();
     return () => { cancelled = true; };
-  }, [clubId, loadingClubs]);
+  }, [clubId, loadingClubs, currentClub]);
 
   return (
     <div className="space-y-6">

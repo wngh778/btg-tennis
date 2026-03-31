@@ -326,13 +326,23 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   return allMatches;
 }
 
-export function getNextSunday(): string {
+const DAY_MAP: Record<string, number> = {
+  '일요일': 0, '월요일': 1, '화요일': 2, '수요일': 3,
+  '목요일': 4, '금요일': 5, '토요일': 6,
+};
+
+export function getNextDay(dayOfWeek: string = '일요일'): string {
+  const target = DAY_MAP[dayOfWeek] ?? 0;
   const today = new Date();
-  const day = today.getDay();
-  const daysUntilSunday = day === 0 ? 7 : 7 - day;
-  const sunday = new Date(today);
-  sunday.setDate(today.getDate() + daysUntilSunday);
-  return sunday.toISOString().split('T')[0];
+  const current = today.getDay();
+  const daysUntil = current === target ? 7 : (target - current + 7) % 7;
+  const next = new Date(today);
+  next.setDate(today.getDate() + daysUntil);
+  return next.toISOString().split('T')[0];
+}
+
+export function getNextSunday(): string {
+  return getNextDay('일요일');
 }
 
 export function isVotingOpen(deadline: string | null): boolean {
