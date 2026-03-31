@@ -302,6 +302,11 @@ export async function addGuest(data: Omit<Guest, 'id'>): Promise<string> {
   return inserted.id;
 }
 
+export async function updateGuest(id: string, data: { name?: string; gender?: string; ntrp?: number }): Promise<void> {
+  const { error } = await supabase.from('guests').update(data).eq('id', id);
+  if (error) throw error;
+}
+
 export async function deleteGuest(id: string): Promise<void> {
   const { error } = await supabase.from('guests').delete().eq('id', id);
   if (error) throw error;

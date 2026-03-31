@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
-  setAttendance, deleteAttendance, addGuest, deleteGuest,
+  setAttendance, deleteAttendance, addGuest, deleteGuest, updateGuest,
   getMatches, saveMatches, insertMatch, deleteMatch, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
   getSessionGroups, unconfirmSession,
 } from '../lib/database';
@@ -68,6 +68,12 @@ export default function SessionDetailPage() {
   const [guestName, setGuestName] = useState('');
   const [guestGender, setGuestGender] = useState<Gender>('male');
   const [guestNtrp, setGuestNtrp] = useState(3.0);
+
+  // Guest edit
+  const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
+  const [editGuestName, setEditGuestName] = useState('');
+  const [editGuestGender, setEditGuestGender] = useState<Gender>('male');
+  const [editGuestNtrp, setEditGuestNtrp] = useState(3.0);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -167,6 +173,50 @@ export default function SessionDetailPage() {
   const handleRemoveGuest = async (guest: Guest) => {
     await deleteGuest(guest.id);
     await deleteAttendance(session.id, guest.id);
+    load();
+  };
+
+  const handleStartEditGuest = (guest: Guest) => {
+    setEditingGuestId(guest.id);
+    setEditGuestName(guest.name);
+    setEditGuestGender(guest.gender);
+    setEditGuestNtrp(guest.ntrp);
+  };
+
+  const handleSaveEditGuest = async () => {
+    if (!editingGuestId) return;
+    const oldGuest = guests.find(g => g.id === editingGuestId);
+    // 게스트 테이블 업데이트
+    await updateGuest(editingGuestId, { name: editGuestName, gender: editGuestGender, ntrp: editGuestNtrp });
+    // attendance 업데이트 (이름, 성별, NTRP 동기화)
+    await setAttendance({
+      sessionId: session.id,
+      playerId: editingGuestId,
+      playerType: 'guest',
+      playerName: editGuestName,
+      gender: editGuestGender,
+      ntrp: editGuestNtrp,
+      attending: true,
+    });
+    // 대진표에 해당 게스트가 포함되어 있으면 match 내 player 정보도 업데이트
+    if (oldGuest) {
+      for (const m of matches) {
+        let changed = false;
+        const updated = { team1: { ...m.team1 }, team2: { ...m.team2 } };
+        for (const team of ['team1', 'team2'] as const) {
+          for (const slot of ['player1', 'player2'] as const) {
+            if (m[team][slot].id === editingGuestId) {
+              updated[team][slot] = { ...m[team][slot], name: editGuestName, gender: editGuestGender, ntrp: editGuestNtrp };
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          await updateMatch(m.id, { team1: updated.team1, team2: updated.team2 });
+        }
+      }
+    }
+    setEditingGuestId(null);
     load();
   };
 
@@ -940,23 +990,63 @@ export default function SessionDetailPage() {
                 <p className="px-5 py-4 text-slate-400 text-sm text-center">등록된 게스트가 없습니다.</p>
               ) : (
                 guests.map(g => (
-                  <div key={g.id} className="px-5 py-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-xs font-medium">게스트</span>
-                      <span className={`w-2 h-2 rounded-full ${g.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                      <span className="font-medium text-slate-800">{g.name}</span>
-                      {isAdminUser && <span className="text-xs font-mono text-slate-400">{g.ntrp.toFixed(1)}</span>}
-                      <span className="text-xs text-slate-400">{g.gender === 'male' ? '남' : '여'}</span>
+                  editingGuestId === g.id ? (
+                    <div key={g.id} className="px-4 sm:px-5 py-3 bg-amber-50 border-b border-amber-100">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                        <input
+                          value={editGuestName}
+                          onChange={e => setEditGuestName(e.target.value)}
+                          className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          placeholder="이름"
+                        />
+                        <select
+                          value={editGuestGender}
+                          onChange={e => setEditGuestGender(e.target.value as Gender)}
+                          className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        >
+                          <option value="male">남성</option>
+                          <option value="female">여성</option>
+                        </select>
+                        <select
+                          value={editGuestNtrp}
+                          onChange={e => setEditGuestNtrp(parseFloat(e.target.value))}
+                          className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        >
+                          {NTRP_OPTIONS.map(n => <option key={n} value={n}>{n.toFixed(1)}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => setEditingGuestId(null)} className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1">취소</button>
+                        <button onClick={handleSaveEditGuest} className="px-3 py-1 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-600">저장</button>
+                      </div>
                     </div>
-                    {isAdminUser && (
-                      <button
-                        onClick={() => handleRemoveGuest(g)}
-                        className="text-red-400 hover:text-red-600 text-sm"
-                      >
-                        삭제
-                      </button>
-                    )}
-                  </div>
+                  ) : (
+                    <div key={g.id} className="px-4 sm:px-5 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-xs font-medium">게스트</span>
+                        <span className={`w-2 h-2 rounded-full ${g.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                        <span className="font-medium text-slate-800">{g.name}</span>
+                        {isAdminUser && <span className="text-xs font-mono text-slate-400">{g.ntrp.toFixed(1)}</span>}
+                        <span className="text-xs text-slate-400">{g.gender === 'male' ? '남' : '여'}</span>
+                      </div>
+                      {isAdminUser && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleStartEditGuest(g)}
+                            className="text-amber-500 hover:text-amber-700 text-sm"
+                          >
+                            수정
+                          </button>
+                          <button
+                            onClick={() => handleRemoveGuest(g)}
+                            className="text-red-400 hover:text-red-600 text-sm"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
                 ))
               )}
             </div>

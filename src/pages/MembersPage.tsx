@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { getMembers, addMember, updateMember, deleteMember } from '../lib/database';
+import { createClient } from '@supabase/supabase-js';
+import { getMembers, addMember, updateMember, deleteMember, usernameToEmail, getClubUsers } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { NTRP_OPTIONS } from '../utils/matchmaking';
@@ -120,6 +121,36 @@ export default function MembersPage() {
 
   const handleAdd = async (data: Omit<Member, 'id' | 'createdAt' | 'clubId'>) => {
     await addMember({ ...data, clubId: currentClub!.id });
+    // 자동 계정 생성 (ID=이름, PW=123456)
+    try {
+      const existingUsers = await getClubUsers(currentClub!.id);
+      const alreadyExists = existingUsers.some(u => u.username === data.name);
+      if (!alreadyExists) {
+        const tempClient = createClient(
+          import.meta.env.VITE_SUPABASE_URL as string,
+          import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+          { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'temp-member-signup' } }
+        );
+        const email = usernameToEmail(data.name);
+        const { data: signUpData, error: signUpError } = await tempClient.auth.signUp({
+          email,
+          password: '123456',
+          options: { emailRedirectTo: undefined },
+        });
+        if (!signUpError && signUpData.user) {
+          await tempClient.from('app_users').insert({
+            id: signUpData.user.id,
+            username: data.name,
+            role: 'member',
+            club_ids: [currentClub!.id],
+            default_club_id: currentClub!.id,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Auto account creation failed:', e);
+      // 계정 생성 실패해도 회원 추가는 성공
+    }
     setShowAdd(false);
     load();
   };

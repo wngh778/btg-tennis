@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { getAppUser, usernameToEmail, createAppUser } from '../lib/database';
 import type { AppUser } from '../types';
@@ -22,56 +22,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  // 현재 로드 중인 userId를 추적하여 중복 호출 방지
+  const loadingUserRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    // 안전장치: 8초 안에 초기화가 안 되면 강제 해제
-    const safetyTimer = setTimeout(() => {
-      console.warn('Auth init timed out, clearing local storage');
-      try {
-        const keys: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('sb-')) keys.push(key);
-        }
-        keys.forEach(k => localStorage.removeItem(k));
-      } catch (_) { /* ignore */ }
-      setUser(null);
-      setAppUser(null);
-      setIsAdminUser(false);
-      setLoading(false);
-    }, 8000);
+  const loadAppUser = async (userId: string) => {
+    // 이미 같은 유저를 로드 중이면 스킵
+    if (loadingUserRef.current === userId) return;
+    loadingUserRef.current = userId;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      clearTimeout(safetyTimer);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        try {
-          // getAppUser에 타임아웃 적용: 5초 이상 걸리면 null 반환
-          const appUserData = await Promise.race([
-            getAppUser(session.user.id),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
-          ]);
-          setAppUser(appUserData);
-          setIsAdminUser(appUserData?.role === 'admin' || appUserData?.role === 'superadmin');
-          setIsSuperAdmin(appUserData?.role === 'superadmin');
-        } catch (e) {
-          console.error('getAppUser error:', e);
-          setAppUser(null);
-          setIsAdminUser(false);
-        }
-      } else {
+    try {
+      const appUserData = await getAppUser(userId);
+      // 로드 완료 시점에 같은 유저인지 확인 (그 사이 로그아웃 등 발생 가능)
+      if (loadingUserRef.current !== userId) return;
+      setAppUser(appUserData);
+      setIsAdminUser(appUserData?.role === 'admin' || appUserData?.role === 'superadmin');
+      setIsSuperAdmin(appUserData?.role === 'superadmin');
+    } catch (e) {
+      console.error('getAppUser error:', e);
+      // 에러 시 기존 appUser 유지 (네트워크 일시 오류 등)
+      // 단, 최초 로드(appUser===null)인 경우만 null 설정
+      if (!appUser) {
         setAppUser(null);
         setIsAdminUser(false);
         setIsSuperAdmin(false);
       }
+    } finally {
+      if (loadingUserRef.current === userId) {
+        loadingUserRef.current = null;
+      }
+    }
+  };
 
-      // getAppUser 완료 후 loading 해제 (race condition 방지)
-      setLoading(false);
+  useEffect(() => {
+    let mounted = true;
+
+    // 1) 초기 세션 확인 (onAuthStateChange보다 빠르고 안정적)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
+      if (session?.user) {
+        setUser(session.user);
+        await loadAppUser(session.user.id);
+      }
+      if (mounted) setLoading(false);
+    }).catch(() => {
+      if (mounted) setLoading(false);
+    });
+
+    // 2) 이후 상태 변경 감지 (토큰 갱신, 로그아웃 등)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setAppUser(null);
+        setIsAdminUser(false);
+        setIsSuperAdmin(false);
+        loadingUserRef.current = null;
+        setLoading(false);
+        return;
+      }
+
+      if (session?.user) {
+        setUser(session.user);
+
+        // TOKEN_REFRESHED일 때는 같은 유저면 appUser 재로드 불필요
+        if (event === 'TOKEN_REFRESHED' && appUser && session.user.id === user?.id) {
+          return;
+        }
+
+        // SIGNED_IN이나 INITIAL_SESSION 등에서만 appUser 로드
+        if (event === 'SIGNED_IN') {
+          await loadAppUser(session.user.id);
+        }
+      }
+
+      if (mounted) setLoading(false);
     });
 
     return () => {
-      clearTimeout(safetyTimer);
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
