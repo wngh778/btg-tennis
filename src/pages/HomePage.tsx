@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getSessions } from '../lib/database';
 import { useClub } from '../contexts/ClubContext';
-import { supabase } from '../lib/supabase';
 import { checkAndAutoCreateSession } from '../utils/autoSession';
 import type { Session } from '../types';
 import { formatDate } from '../utils/formatting';
@@ -28,7 +27,6 @@ export default function HomePage() {
 
     const loadSessions = async () => {
       try {
-        await supabase.auth.getSession(); // 탭 복귀 시 토큰 갱신
         let sessions = await getSessions(clubId);
         if (cancelled) return;
 

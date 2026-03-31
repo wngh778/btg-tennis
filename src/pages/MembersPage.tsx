@@ -3,7 +3,6 @@ import { createClient } from '@supabase/supabase-js';
 import { getMembers, addMember, updateMember, deleteMember, usernameToEmail, getClubUsers } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { supabase } from '../lib/supabase';
 import { NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Member, Gender } from '../types';
 
@@ -104,7 +103,6 @@ export default function MembersPage() {
   const load = async () => {
     if (!clubId) { setLoading(false); return; }
     try {
-      await supabase.auth.getSession();
       const data = await getMembers(clubId);
       setMembers(data);
     } catch (e) {

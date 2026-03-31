@@ -3,6 +3,17 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+// 모든 Supabase HTTP 요청에 10초 타임아웃 적용
+// 탭 방치 후 복귀 시 네트워크 요청이 무한 대기하는 것을 방지
+const fetchWithTimeout: typeof fetch = (input, init) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  const signal = init?.signal
+    ? init.signal // 이미 signal이 있으면 그것을 사용
+    : controller.signal;
+  return fetch(input, { ...init, signal }).finally(() => clearTimeout(timeout));
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     // 크로스탭 토큰 갱신 락 비활성화
@@ -10,5 +21,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     // 문제: 이전 탭이 락을 남기고 닫히면 새 탭이 락을 무한정 기다리며 먹통이 됨
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     lock: (_name: string, _acquireTimeout: number, fn: () => Promise<any>) => fn(),
+  },
+  global: {
+    fetch: fetchWithTimeout,
   },
 });

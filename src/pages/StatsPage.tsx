@@ -2,7 +2,6 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { supabase } from '../lib/supabase';
 import type { Match, Session } from '../types';
 import { formatDate } from '../utils/formatting';
 
@@ -141,7 +140,6 @@ export default function StatsPage() {
       setLoadError(false);
 
       try {
-        await supabase.auth.getSession();
         const [allMatches, members, allSessions, allAttendance] = await Promise.all([
           getAllMatches(clubId),
           getMembers(clubId),

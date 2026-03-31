@@ -8,7 +8,6 @@ import {
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { supabase } from '../lib/supabase';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
@@ -79,10 +78,6 @@ export default function SessionDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      // 탭 방치 후 복귀 시 만료된 토큰으로 요청하면 무한 대기 가능
-      // 먼저 세션 갱신 시도하여 토큰이 유효한 상태에서 API 호출
-      await supabase.auth.getSession();
-
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('요청 시간이 초과되었습니다. 새로고침 해주세요.')), 10000)
       );
