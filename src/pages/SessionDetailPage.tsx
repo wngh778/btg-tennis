@@ -8,6 +8,7 @@ import {
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
+import { supabase } from '../lib/supabase';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
@@ -78,17 +79,29 @@ export default function SessionDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [s, g, a, mx, grps] = await Promise.all([
-        getSession(id), getGuests(id), getAttendance(id), getMatches(id), getSessionGroups(id),
-      ]);
-      const clubId = s?.clubId ?? currentClub?.id;
-      const m = clubId ? await getMembers(clubId) : [];
+      // 탭 방치 후 복귀 시 만료된 토큰으로 요청하면 무한 대기 가능
+      // 먼저 세션 갱신 시도하여 토큰이 유효한 상태에서 API 호출
+      await supabase.auth.getSession();
+
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('요청 시간이 초과되었습니다. 새로고침 해주세요.')), 10000)
+      );
+      const fetchData = async () => {
+        const [s, g, a, mx, grps] = await Promise.all([
+          getSession(id), getGuests(id), getAttendance(id), getMatches(id), getSessionGroups(id),
+        ]);
+        const clubId = s?.clubId ?? currentClub?.id;
+        const m = clubId ? await getMembers(clubId) : [];
+        return { s, m, g, a, mx, grps };
+      };
+      const { s, m, g, a, mx, grps } = await Promise.race([fetchData(), timeout]);
       setSession(s);
       setMembers(m);
       setGuests(g);
       setAttendanceState(a);
       setMatches(mx);
       setGroups(grps);
+      setError(null);
     } catch (e: unknown) {
       console.error(e);
       setError(e instanceof Error ? e.message : String(e));
@@ -99,6 +112,17 @@ export default function SessionDetailPage() {
 
   // auth 초기화 완료 후에만 데이터 로드 (새로고침 시 세션 미초기화 상태에서 쿼리 실행 방지)
   useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
+
+  // 탭 복귀 시 데이터 재로드 (방치 후 토큰 만료 대응)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && !authLoading && id) {
+        load();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [load, authLoading, id]);
 
   // 조별경기: 그룹 로드 후 내 그룹 자동 선택
   useEffect(() => {

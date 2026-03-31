@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { getAllMatches, getMembers, getSessions, getAllAttendance } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
+import { supabase } from '../lib/supabase';
 import type { Match, Session } from '../types';
 import { formatDate } from '../utils/formatting';
 
@@ -140,6 +141,7 @@ export default function StatsPage() {
       setLoadError(false);
 
       try {
+        await supabase.auth.getSession();
         const [allMatches, members, allSessions, allAttendance] = await Promise.all([
           getAllMatches(clubId),
           getMembers(clubId),
@@ -182,7 +184,13 @@ export default function StatsPage() {
     };
 
     load();
-    return () => { cancelled = true; };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && !cancelled) load();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', handleVisibility); };
   }, [clubId, loadingClubs, currentClub, computeStats, retryCount]);
 
   // 세션 타입 + 날짜 범위로 필터된 세션 목록

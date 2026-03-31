@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getSessions, addSession, updateSession, deleteSession, addSessionGroup } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
+import { supabase } from '../lib/supabase';
 import { getNextDay } from '../utils/matchmaking';
 import type { Session, SessionType, GameMode } from '../types';
 import { formatDate } from '../utils/formatting';
@@ -358,6 +359,7 @@ export default function SessionsPage() {
   const load = async () => {
     if (!clubId) { setLoading(false); return; }
     try {
+      await supabase.auth.getSession();
       const data = await getSessions(clubId);
       setSessions(data);
     } catch (e) {
@@ -367,7 +369,14 @@ export default function SessionsPage() {
     }
   };
 
-  useEffect(() => { if (!authLoading && !loadingClubs) load(); }, [authLoading, loadingClubs, clubId]);
+  useEffect(() => {
+    if (!authLoading && !loadingClubs) load();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && !authLoading && !loadingClubs) load();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [authLoading, loadingClubs, clubId]);
 
   const handleDelete = async (id: string, date: string, title?: string | null) => {
     const label = title ?? formatDate(date);

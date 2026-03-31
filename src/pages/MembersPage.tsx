@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getMembers, addMember, updateMember, deleteMember, usernameToEmail, getClubUsers } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
+import { supabase } from '../lib/supabase';
 import { NTRP_OPTIONS } from '../utils/matchmaking';
 import type { Member, Gender } from '../types';
 
@@ -103,6 +104,7 @@ export default function MembersPage() {
   const load = async () => {
     if (!clubId) { setLoading(false); return; }
     try {
+      await supabase.auth.getSession();
       const data = await getMembers(clubId);
       setMembers(data);
     } catch (e) {
@@ -115,6 +117,12 @@ export default function MembersPage() {
   useEffect(() => {
     if (!authLoading && !loadingClubs && isAdminUser) load();
     else if (!authLoading && !loadingClubs) setLoading(false);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && !authLoading && !loadingClubs && isAdminUser) load();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [authLoading, loadingClubs, isAdminUser, clubId]);
 
   if (!isAdminUser && !authLoading) {
