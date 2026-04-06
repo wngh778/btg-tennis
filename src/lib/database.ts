@@ -251,7 +251,8 @@ export async function getAttendance(sessionId: string): Promise<AttendanceRecord
   return (data ?? []).map(rowToAttendance);
 }
 
-export async function setAttendance(data: Omit<AttendanceRecord, 'id' | 'updatedAt'>): Promise<void> {
+export async function setAttendance(data: Omit<AttendanceRecord, 'id' | 'updatedAt'>, asAdmin = false): Promise<void> {
+  const client = asAdmin ? (supabaseAdmin ?? supabase) : supabase;
   const upsertData: Record<string, unknown> = {
     session_id: data.sessionId,
     player_id: data.playerId,
@@ -263,14 +264,15 @@ export async function setAttendance(data: Omit<AttendanceRecord, 'id' | 'updated
     updated_at: new Date().toISOString(),
   };
   if (data.isLate !== undefined) upsertData.is_late = data.isLate;
-  const { error } = await supabase
+  const { error } = await client
     .from('attendance')
     .upsert(upsertData, { onConflict: 'session_id,player_id' });
   if (error) throw error;
 }
 
-export async function deleteAttendance(sessionId: string, playerId: string): Promise<void> {
-  const { error } = await supabase
+export async function deleteAttendance(sessionId: string, playerId: string, asAdmin = false): Promise<void> {
+  const client = asAdmin ? (supabaseAdmin ?? supabase) : supabase;
+  const { error } = await client
     .from('attendance')
     .delete()
     .eq('session_id', sessionId)

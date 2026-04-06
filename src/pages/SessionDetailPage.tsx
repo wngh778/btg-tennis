@@ -133,7 +133,7 @@ export default function SessionDetailPage() {
       ntrp: member.ntrp,
       attending,
       ...(session.trackLate && attending ? { isLate: false } : {}),
-    });
+    }, isAdminUser);
     load();
   };
 
@@ -150,7 +150,7 @@ export default function SessionDetailPage() {
       ntrp: member.ntrp,
       attending: true,
       isLate,
-    });
+    }, isAdminUser);
     load();
   };
 
@@ -165,7 +165,7 @@ export default function SessionDetailPage() {
       gender: guestGender,
       ntrp: guestNtrp,
       attending: true,
-    });
+    }, isAdminUser);
     setGuestName(''); setGuestGender('male'); setGuestNtrp(3.0);
     setShowGuestForm(false);
     load();
@@ -173,7 +173,7 @@ export default function SessionDetailPage() {
 
   const handleRemoveGuest = async (guest: Guest) => {
     await deleteGuest(guest.id);
-    await deleteAttendance(session.id, guest.id);
+    await deleteAttendance(session.id, guest.id, isAdminUser);
     load();
   };
 
@@ -198,7 +198,7 @@ export default function SessionDetailPage() {
       gender: editGuestGender,
       ntrp: editGuestNtrp,
       attending: true,
-    });
+    }, isAdminUser);
     // 대진표에 해당 게스트가 포함되어 있으면 match 내 player 정보도 업데이트
     if (oldGuest) {
       for (const m of matches) {
