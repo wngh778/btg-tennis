@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
+import { parseBracketImage, buildMatchesFromParsed } from '../utils/imageParsing';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
@@ -60,6 +61,10 @@ export default function SessionDetailPage() {
   // Mixed rounds balance suggestion
   const [showMixedSuggestion, setShowMixedSuggestion] = useState(false);
   const [suggestedMixedRounds, setSuggestedMixedRounds] = useState(0);
+
+  // 사진 대진표 불러오기
+  const [imageParseLoading, setImageParseLoading] = useState(false);
+  const [imageParseError, setImageParseError] = useState<string | null>(null);
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
@@ -232,6 +237,81 @@ export default function SessionDetailPage() {
     setGenerateMixedRounds(session.mixedRounds);
     setGenerateTargetGroup('all');
     setShowGenerateModal(true);
+  };
+
+  // --- 사진으로 대진표 불러오기 ---
+  const handleImageBracketUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // 같은 파일 재선택 가능하도록 초기화
+
+    setImageParseError(null);
+    setImageParseLoading(true);
+    try {
+      // 파일 → base64
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
+      // Claude Vision으로 파싱
+      const parsed = await parseBracketImage(base64, mediaType);
+
+      // 현재 세션 멤버+게스트 전체를 Player 목록으로 만들어 이름 매칭에 활용
+      const allKnownPlayers = [
+        ...members.filter(m => m.isActive).map(m => ({
+          id: m.id, name: m.name, gender: m.gender, ntrp: m.ntrp, type: 'member' as const,
+        })),
+        ...guests.map(g => ({
+          id: g.id, name: g.name, gender: g.gender, ntrp: g.ntrp, type: 'guest' as const,
+        })),
+      ];
+
+      const { matches: generated, unmatchedNames } = buildMatchesFromParsed(
+        session.id,
+        parsed,
+        allKnownPlayers,
+      );
+
+      if (generated.length === 0) {
+        throw new Error('대진표를 인식하지 못했습니다. 사진을 더 선명하게 찍어 다시 시도해주세요.');
+      }
+
+      // 기존 대진표 덮어쓰기 확인
+      if (matches.length > 0) {
+        const ok = confirm(
+          `기존 대진표(${matches.length}경기)를 사진 대진표로 교체하시겠습니까?\n` +
+          `인식된 경기: ${generated.length}경기 (${parsed.rounds}라운드)`,
+        );
+        if (!ok) return;
+      }
+
+      await saveMatches(session.id, generated);
+      await updateSession(session.id, {
+        isGenerated: true,
+        rounds: parsed.rounds,
+        // courts는 파싱된 최대 코트번호로 업데이트
+        courts: Math.max(...generated.map(m => m.court), session.courts),
+      });
+
+      if (unmatchedNames.length > 0) {
+        setImageParseError(
+          `매칭 실패 선수(임시 게스트로 등록됨): ${unmatchedNames.join(', ')}\n` +
+          `편집 모드에서 수동으로 수정해주세요.`,
+        );
+      }
+
+      load();
+      setTab('bracket');
+    } catch (err) {
+      setImageParseError(err instanceof Error ? err.message : '알 수 없는 오류');
+    } finally {
+      setImageParseLoading(false);
+    }
   };
 
   // 실제 대진표 생성 실행
@@ -1749,15 +1829,44 @@ export default function SessionDetailPage() {
                 </button>
               )}
               {isAdminUser && !editMode && (
-                <button
-                  onClick={handleGenerateClick}
-                  className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
-                >
-                  {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
-                </button>
+                <>
+                  {/* 사진으로 불러오기 */}
+                  <label className={`cursor-pointer px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
+                    imageParseLoading
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}>
+                    {imageParseLoading ? '📷 인식 중...' : '📷 사진으로 불러오기'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      disabled={imageParseLoading}
+                      onChange={handleImageBracketUpload}
+                    />
+                  </label>
+                  <button
+                    onClick={handleGenerateClick}
+                    className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
+                  >
+                    {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
+                  </button>
+                </>
               )}
             </div>
           </div>
+
+          {/* 사진 불러오기 오류/경고 */}
+          {imageParseError && (
+            <div className="rounded-xl p-3 text-sm bg-orange-50 border border-orange-200 text-orange-700 flex items-start justify-between gap-2">
+              <span className="whitespace-pre-line">{imageParseError}</span>
+              <button
+                onClick={() => setImageParseError(null)}
+                className="shrink-0 text-orange-400 hover:text-orange-600 font-bold"
+              >✕</button>
+            </div>
+          )}
 
           {session.isConfirmed && (
             <div className={`rounded-xl p-3 text-sm flex items-center justify-between ${isSuperAdmin ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
