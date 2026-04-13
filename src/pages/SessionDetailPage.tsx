@@ -234,8 +234,10 @@ export default function SessionDetailPage() {
     setShowGenerateModal(true);
   };
 
-  // 실제 대진표 생성 실행 (mixedRoundsToUse: 최종 결정된 혼복 라운드 수)
-  const doGenerate = async (mixedRoundsToUse: number) => {
+  // 실제 대진표 생성 실행
+  // mixedRoundsToUse: 최종 결정된 혼복 라운드 수
+  // mixedLast: true면 남복/여복 먼저, 혼복 나중 배치 (제안 수락 시 사용)
+  const doGenerate = async (mixedRoundsToUse: number, mixedLast = false) => {
     setShowGenerateModal(false);
     setShowMixedSuggestion(false);
     const pastMatches = await getAllMatches(session.clubId);
@@ -248,6 +250,7 @@ export default function SessionDetailPage() {
       courts: generateCourts,
       totalRounds: generateRounds,
       mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
+      mixedLast,
       sessionType: session.type,
       pastMatches,
       latePlayerIds,
@@ -1638,7 +1641,7 @@ export default function SessionDetailPage() {
                   아니오 (현재 설정 유지)
                 </button>
                 <button
-                  onClick={() => doGenerate(suggestedMixedRounds)}
+                  onClick={() => doGenerate(suggestedMixedRounds, true)}
                   className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
                 >
                   예 (혼복 {suggestedMixedRounds}R)

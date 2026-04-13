@@ -202,14 +202,15 @@ export interface GenerateOptions {
   players: Player[];
   courts: number;
   totalRounds: number;
-  mixedRounds: number; // 혼복 라운드 수 (처음 N라운드)
+  mixedRounds: number; // 혼복 라운드 수
+  mixedLast?: boolean; // true면 남복/여복 먼저, 혼복 나중 배치 (기본: 혼복 먼저)
   sessionType: 'weekly' | 'quarterly';
   pastMatches: Match[];
   latePlayerIds?: Set<string>; // 지각자 ID 집합 - 1라운드 제외
 }
 
 export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
-  const { sessionId, courts, totalRounds, mixedRounds, sessionType, pastMatches } = options;
+  const { sessionId, courts, totalRounds, mixedRounds, mixedLast = false, sessionType, pastMatches } = options;
   const { players, latePlayerIds = new Set<string>() } = options;
 
   const history = buildHistory(pastMatches);
@@ -252,7 +253,10 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         addGames(playing);
       }
     } else {
-      const isMixed = round <= mixedRounds;
+      // mixedLast=true면 뒤쪽 N라운드가 혼복, 앞쪽이 남복/여복
+      const isMixed = mixedLast
+        ? round > totalRounds - mixedRounds
+        : round <= mixedRounds;
 
       if (isMixed) {
         const sm = byLeastGames(males, round);
