@@ -9,8 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
-import { parseBracketImage, buildMatchesFromParsed } from '../utils/imageParsing';
-import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup, MatchType } from '../types';
+import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
 import { RoundCard } from '../components/session/RoundCard';
@@ -61,21 +60,6 @@ export default function SessionDetailPage() {
   // Mixed rounds balance suggestion
   const [showMixedSuggestion, setShowMixedSuggestion] = useState(false);
   const [suggestedMixedRounds, setSuggestedMixedRounds] = useState(0);
-
-  // 사진 대진표 불러오기
-  const [imageParseLoading, setImageParseLoading] = useState(false);
-  const [imageParseError, setImageParseError] = useState<string | null>(null);
-
-  // 팀 배정 모달 (사진 불러오기 후 또는 수동으로 열기)
-  const [showTeamSetup, setShowTeamSetup] = useState(false);
-  const [teamSetupItems, setTeamSetupItems] = useState<{
-    matchId: string;
-    round: number;
-    court: number;
-    matchType: MatchType;
-    players: Player[]; // 항상 4명: [team1.p1, team1.p2, team2.p1, team2.p2]
-    rotation: number;  // 현재 선택된 팀 조합 인덱스
-  }[]>([]);
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
@@ -248,151 +232,6 @@ export default function SessionDetailPage() {
     setGenerateMixedRounds(session.mixedRounds);
     setGenerateTargetGroup('all');
     setShowGenerateModal(true);
-  };
-
-  // --- 팀 배정 헬퍼 ---
-  // 4명의 플레이어로 가능한 팀 조합 반환
-  // 혼복: 남+여 짝 2가지 / 남복·여복: 3가지
-  const getTeamRotations = (players: Player[], matchType: MatchType) => {
-    // undefined/null 방어 — DB에서 player 데이터가 누락된 경우
-    const valid = players.filter((p): p is Player => !!p);
-    if (valid.length < 4) {
-      // 선수 데이터 불완전: 단순 2vs2 조합만 반환
-      const padded: Player[] = [...valid];
-      while (padded.length < 4) padded.push(valid[padded.length % Math.max(valid.length, 1)]);
-      return [{ team1: [padded[0], padded[1]], team2: [padded[2], padded[3]] }];
-    }
-    if (matchType === 'mixed') {
-      const males = valid.filter(p => p.gender === 'male');
-      const females = valid.filter(p => p.gender === 'female');
-      if (males.length >= 2 && females.length >= 2) {
-        return [
-          { team1: [males[0], females[0]], team2: [males[1], females[1]] },
-          { team1: [males[0], females[1]], team2: [males[1], females[0]] },
-        ];
-      }
-    }
-    return [
-      { team1: [valid[0], valid[1]], team2: [valid[2], valid[3]] },
-      { team1: [valid[0], valid[2]], team2: [valid[1], valid[3]] },
-      { team1: [valid[0], valid[3]], team2: [valid[1], valid[2]] },
-    ];
-  };
-
-  const openTeamSetup = (sourceMatches: Match[]) => {
-    const items = sourceMatches
-      .filter(m => !m.isCompleted)
-      // team1/team2 player 데이터가 모두 있는 경기만 포함
-      .filter(m => m.team1?.player1 && m.team1?.player2 && m.team2?.player1 && m.team2?.player2)
-      .sort((a, b) => a.round - b.round || a.court - b.court)
-      .map(m => ({
-        matchId: m.id,
-        round: m.round,
-        court: m.court,
-        matchType: m.matchType,
-        players: [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2],
-        rotation: 0,
-      }));
-    setTeamSetupItems(items);
-    setShowTeamSetup(true);
-  };
-
-  const handleTeamSetupSave = async () => {
-    for (const item of teamSetupItems) {
-      const rotations = getTeamRotations(item.players, item.matchType);
-      const { team1, team2 } = rotations[item.rotation % rotations.length];
-      await updateMatch(item.matchId, {
-        team1: { player1: team1[0], player2: team1[1] },
-        team2: { player1: team2[0], player2: team2[1] },
-      });
-    }
-    setShowTeamSetup(false);
-    load();
-    setTab('bracket');
-  };
-
-  // --- 사진으로 대진표 불러오기 ---
-  const handleImageBracketUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = ''; // 같은 파일 재선택 가능하도록 초기화
-
-    setImageParseError(null);
-    setImageParseLoading(true);
-    setTab('bracket'); // 처리 중 bracket 탭으로 고정
-    try {
-      // 파일 → base64
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
-
-      // Claude Vision으로 파싱
-      const parsed = await parseBracketImage(base64, mediaType);
-
-      // 현재 세션 멤버+게스트 전체를 Player 목록으로 만들어 이름 매칭에 활용
-      const allKnownPlayers: { id: string; name: string; gender: 'male' | 'female'; ntrp: number; type: 'member' | 'guest' }[] = [
-        ...members.filter(m => m.isActive).map(m => ({
-          id: m.id, name: m.name, gender: m.gender, ntrp: m.ntrp, type: 'member' as const,
-        })),
-        ...guests.map(g => ({
-          id: g.id, name: g.name, gender: g.gender, ntrp: g.ntrp, type: 'guest' as const,
-        })),
-      ];
-
-      // 1차 빌드: 매칭 안 된 선수 파악
-      const { unmatchedPlayers } = buildMatchesFromParsed(session.id, parsed, allKnownPlayers);
-
-      // 매칭 안 된 선수를 게스트로 DB에 추가 후 knownPlayers 목록 갱신
-      for (const p of unmatchedPlayers) {
-        const guestId = await addGuest({ name: p.name, gender: p.gender, ntrp: 3.0, sessionId: session.id });
-        allKnownPlayers.push({ id: guestId, name: p.name, gender: p.gender, ntrp: 3.0, type: 'guest' });
-      }
-
-      // 2차 빌드: 실제 DB ID로 매칭된 경기 목록
-      const { matches: generated } = buildMatchesFromParsed(session.id, parsed, allKnownPlayers);
-
-      if (generated.length === 0) {
-        throw new Error('대진표를 인식하지 못했습니다. 사진을 더 선명하게 찍어 다시 시도해주세요.');
-      }
-
-      // 기존 대진표 덮어쓰기 확인
-      if (matches.length > 0) {
-        const ok = confirm(
-          `기존 대진표(${matches.length}경기)를 사진 대진표로 교체하시겠습니까?\n` +
-          `인식된 경기: ${generated.length}경기 (${parsed.rounds}라운드)`,
-        );
-        if (!ok) return;
-      }
-
-      await saveMatches(session.id, generated);
-      await updateSession(session.id, {
-        isGenerated: true,
-        rounds: parsed.rounds,
-        courts: Math.max(...generated.map(m => m.court), session.courts),
-      });
-
-      if (unmatchedPlayers.length > 0) {
-        setImageParseError(
-          `새 게스트 자동 추가됨: ${unmatchedPlayers.map(p => p.name).join(', ')}`,
-        );
-      }
-
-      // 저장된 경기를 불러와 팀 배정 화면 열기
-      const freshMatches = await getMatches(session.id);
-      load(); // 세션 정보 갱신 (백그라운드)
-      openTeamSetup(freshMatches);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
-      setImageParseError(msg);
-      alert('사진 불러오기 실패: ' + msg);
-    } finally {
-      setImageParseLoading(false);
-    }
   };
 
   // 실제 대진표 생성 실행
@@ -1813,69 +1652,6 @@ export default function SessionDetailPage() {
         );
       })()}
 
-      {/* 팀 배정 모달 */}
-      {showTeamSetup && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-lg flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between shrink-0">
-              <div>
-                <h2 className="font-bold text-slate-800 text-lg">팀 배정</h2>
-                <p className="text-xs text-slate-400 mt-0.5">🔄 버튼으로 팀 조합을 선택하세요</p>
-              </div>
-              <button onClick={() => setShowTeamSetup(false)} className="text-slate-400 hover:text-slate-600 text-xl font-bold mt-0.5">✕</button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 px-4 py-4 space-y-3">
-              {teamSetupItems.map((item, idx) => {
-                const rotations = getTeamRotations(item.players, item.matchType);
-                const cur = rotations[item.rotation % rotations.length];
-                const typeLabel = item.matchType === 'male' ? '남복' : item.matchType === 'female' ? '여복' : '혼복';
-                const totalCombos = rotations.length;
-                return (
-                  <div key={item.matchId} className="bg-slate-50 rounded-xl p-3">
-                    <div className="flex items-center justify-between mb-2.5">
-                      <span className="text-xs font-semibold text-slate-500">
-                        {item.round}R · {item.court}코트 · {typeLabel}
-                      </span>
-                      <button
-                        onClick={() => setTeamSetupItems(prev =>
-                          prev.map((it, i) => i === idx ? { ...it, rotation: (it.rotation + 1) % totalCombos } : it)
-                        )}
-                        className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors"
-                      >
-                        🔄 팀 변경 <span className="text-blue-400">({item.rotation % totalCombos + 1}/{totalCombos})</span>
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-blue-50 border border-blue-100 rounded-lg p-2 text-center">
-                        <p className="text-[10px] text-blue-400 font-medium mb-1">팀 1</p>
-                        <p className="text-sm font-semibold text-blue-700">{cur.team1[0].name}</p>
-                        <p className="text-sm font-semibold text-blue-700">{cur.team1[1].name}</p>
-                      </div>
-                      <span className="text-slate-400 font-bold text-sm shrink-0">vs</span>
-                      <div className="flex-1 bg-rose-50 border border-rose-100 rounded-lg p-2 text-center">
-                        <p className="text-[10px] text-rose-400 font-medium mb-1">팀 2</p>
-                        <p className="text-sm font-semibold text-rose-700">{cur.team2[0].name}</p>
-                        <p className="text-sm font-semibold text-rose-700">{cur.team2[1].name}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="px-6 py-4 border-t border-slate-100 shrink-0">
-              <button
-                onClick={handleTeamSetupSave}
-                className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors text-sm"
-              >
-                저장
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Groups Tab */}
       {tab === 'groups' && session.gameMode === 'group' && isAdminUser && (
         <GroupsTab
@@ -1972,53 +1748,16 @@ export default function SessionDetailPage() {
                   월요일 편성
                 </button>
               )}
-              {/* 팀 배정 버튼 - 로그인한 모든 사용자 */}
-              {user && matches.length > 0 && !editMode && (
-                <button
-                  onClick={() => openTeamSetup(matches)}
-                  className="bg-blue-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-600 transition-colors"
-                >
-                  팀 배정
-                </button>
-              )}
               {isAdminUser && !editMode && (
-                <>
-                  {/* 사진으로 불러오기 */}
-                  <label className={`cursor-pointer px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
-                    imageParseLoading
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
-                  }`}>
-                    {imageParseLoading ? '📷 인식 중...' : '📷 사진으로 불러오기'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={imageParseLoading}
-                      onChange={handleImageBracketUpload}
-                    />
-                  </label>
-                  <button
-                    onClick={handleGenerateClick}
-                    className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
-                  >
-                    {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
-                  </button>
-                </>
+                <button
+                  onClick={handleGenerateClick}
+                  className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
+                </button>
               )}
             </div>
           </div>
-
-          {/* 사진 불러오기 오류/경고 */}
-          {imageParseError && (
-            <div className="rounded-xl p-3 text-sm bg-orange-50 border border-orange-200 text-orange-700 flex items-start justify-between gap-2">
-              <span className="whitespace-pre-line">{imageParseError}</span>
-              <button
-                onClick={() => setImageParseError(null)}
-                className="shrink-0 text-orange-400 hover:text-orange-600 font-bold"
-              >✕</button>
-            </div>
-          )}
 
           {session.isConfirmed && (
             <div className={`rounded-xl p-3 text-sm flex items-center justify-between ${isSuperAdmin ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
