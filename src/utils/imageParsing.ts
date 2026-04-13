@@ -1,4 +1,3 @@
-import { supabase } from '../lib/supabase';
 import type { Match, Player, MatchType } from '../types';
 
 export interface ParsedPlayer {
@@ -21,12 +20,23 @@ export async function parseBracketImage(
   imageBase64: string,
   mediaType: string,
 ): Promise<ParsedBracket> {
-  const { data, error } = await supabase.functions.invoke('parse-bracket', {
-    body: { imageBase64, mediaType },
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/parse-bracket`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${anonKey}`,
+    },
+    body: JSON.stringify({ imageBase64, mediaType }),
   });
 
-  if (error) throw new Error(`대진표 인식 실패: ${error.message}`);
-  if (data?.error) throw new Error(data.error);
+  const data = await res.json() as { text?: string; error?: string };
+
+  if (!res.ok || data?.error) {
+    throw new Error(data?.error ?? `Edge Function 오류 (${res.status})`);
+  }
 
   const text: string = data?.text ?? '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);

@@ -309,6 +309,7 @@ export default function SessionDetailPage() {
 
     setImageParseError(null);
     setImageParseLoading(true);
+    setTab('bracket'); // 처리 중 bracket 탭으로 고정
     try {
       // 파일 → base64
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -371,7 +372,9 @@ export default function SessionDetailPage() {
       load(); // 세션 정보 갱신 (백그라운드)
       openTeamSetup(freshMatches);
     } catch (err) {
-      setImageParseError(err instanceof Error ? err.message : '알 수 없는 오류');
+      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+      setImageParseError(msg);
+      alert('사진 불러오기 실패: ' + msg);
     } finally {
       setImageParseLoading(false);
     }
