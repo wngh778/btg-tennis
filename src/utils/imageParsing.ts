@@ -1,6 +1,6 @@
 import type { Match, Player, MatchType } from '../types';
 
-// Claude Vision API가 반환하는 선수별 파싱 결과
+// 파싱 결과 타입
 export interface ParsedPlayer {
   name: string;
   gender: 'male' | 'female';
@@ -13,7 +13,7 @@ export interface ParsedBracket {
 }
 
 /**
- * 칠판 대진표 사진을 Claude Vision API로 파싱.
+ * 칠판 대진표 사진을 Gemini Vision API로 파싱.
  * - 왼쪽 열: 남자 선수 (gender: "male")
  * - 오른쪽 열: 여자 선수 (gender: "female")
  * - 각 행: 이름 + 라운드별 코트번호 (숫자=코트, -=휴식)
@@ -22,29 +22,24 @@ export async function parseBracketImage(
   imageBase64: string,
   mediaType: string,
 ): Promise<ParsedBracket> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('Anthropic API 키가 설정되지 않았습니다. 관리자에게 문의하세요.');
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 관리자에게 문의하세요.');
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-calls': 'true',
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: [
+      contents: [{
+        parts: [
           {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
+            inline_data: {
+              mime_type: mediaType,
+              data: imageBase64,
+            },
           },
           {
-            type: 'text',
             text: `테니스 대진표가 적힌 칠판 사진입니다.
 규칙:
 - 왼쪽 열: 남자 선수 → gender: "male"
@@ -58,17 +53,20 @@ export async function parseBracketImage(
           },
         ],
       }],
+      generationConfig: { temperature: 0 },
     }),
   });
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     const msg = (err as { error?: { message?: string } })?.error?.message;
-    throw new Error(msg || `API 오류 (${response.status})`);
+    throw new Error(msg || `Gemini API 오류 (${response.status})`);
   }
 
-  const data = await response.json() as { content: { text: string }[] };
-  const text = data.content[0].text.trim();
+  const data = await response.json() as {
+    candidates: { content: { parts: { text: string }[] } }[];
+  };
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
 
   // JSON 블록 추출 (마크다운 코드블록 또는 순수 JSON)
   const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -82,7 +80,7 @@ export async function parseBracketImage(
 
 /**
  * 파싱된 칠판 데이터 → Match 배열 변환.
- * knownPlayers: 현재 세션 참석자(또는 전체 멤버+게스트) 목록으로 이름 매칭.
+ * knownPlayers: 현재 세션 멤버+게스트 목록으로 이름 매칭.
  * 매칭 실패 시 임시 guest Player 생성 (id: "img_이름").
  */
 export function buildMatchesFromParsed(
@@ -144,7 +142,7 @@ export function buildMatchesFromParsed(
         t1p1 = males[0]; t1p2 = females[0];
         t2p1 = males[1]; t2p2 = females[1];
       } else {
-        // 남복/여복: 앞 2명 vs 뒤 2명 (임의 - 실제 팀은 게임 전 결정)
+        // 남복/여복: 앞 2명 vs 뒤 2명 (임의 — 실제 팀은 게임 전 결정)
         [t1p1, t1p2, t2p1, t2p2] = resolved as [Player, Player, Player, Player];
       }
 
