@@ -10,7 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
 import { parseBracketImage, buildMatchesFromParsed } from '../utils/imageParsing';
-import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
+import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup, MatchType } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
 import { RoundCard } from '../components/session/RoundCard';
@@ -65,6 +65,17 @@ export default function SessionDetailPage() {
   // 사진 대진표 불러오기
   const [imageParseLoading, setImageParseLoading] = useState(false);
   const [imageParseError, setImageParseError] = useState<string | null>(null);
+
+  // 팀 배정 모달 (사진 불러오기 후 또는 수동으로 열기)
+  const [showTeamSetup, setShowTeamSetup] = useState(false);
+  const [teamSetupItems, setTeamSetupItems] = useState<{
+    matchId: string;
+    round: number;
+    court: number;
+    matchType: MatchType;
+    players: Player[]; // 항상 4명: [team1.p1, team1.p2, team2.p1, team2.p2]
+    rotation: number;  // 현재 선택된 팀 조합 인덱스
+  }[]>([]);
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
@@ -239,6 +250,57 @@ export default function SessionDetailPage() {
     setShowGenerateModal(true);
   };
 
+  // --- 팀 배정 헬퍼 ---
+  // 4명의 플레이어로 가능한 팀 조합 반환
+  // 혼복: 남+여 짝 2가지 / 남복·여복: 3가지
+  const getTeamRotations = (players: Player[], matchType: MatchType) => {
+    if (matchType === 'mixed') {
+      const males = players.filter(p => p.gender === 'male');
+      const females = players.filter(p => p.gender === 'female');
+      if (males.length >= 2 && females.length >= 2) {
+        return [
+          { team1: [males[0], females[0]], team2: [males[1], females[1]] },
+          { team1: [males[0], females[1]], team2: [males[1], females[0]] },
+        ];
+      }
+    }
+    return [
+      { team1: [players[0], players[1]], team2: [players[2], players[3]] },
+      { team1: [players[0], players[2]], team2: [players[1], players[3]] },
+      { team1: [players[0], players[3]], team2: [players[1], players[2]] },
+    ];
+  };
+
+  const openTeamSetup = (sourceMatches: Match[]) => {
+    const items = sourceMatches
+      .filter(m => !m.isCompleted)
+      .sort((a, b) => a.round - b.round || a.court - b.court)
+      .map(m => ({
+        matchId: m.id,
+        round: m.round,
+        court: m.court,
+        matchType: m.matchType,
+        players: [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2],
+        rotation: 0,
+      }));
+    setTeamSetupItems(items);
+    setShowTeamSetup(true);
+  };
+
+  const handleTeamSetupSave = async () => {
+    for (const item of teamSetupItems) {
+      const rotations = getTeamRotations(item.players, item.matchType);
+      const { team1, team2 } = rotations[item.rotation % rotations.length];
+      await updateMatch(item.matchId, {
+        team1: { player1: team1[0], player2: team1[1] },
+        team2: { player1: team2[0], player2: team2[1] },
+      });
+    }
+    setShowTeamSetup(false);
+    load();
+    setTab('bracket');
+  };
+
   // --- 사진으로 대진표 불러오기 ---
   const handleImageBracketUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -300,13 +362,14 @@ export default function SessionDetailPage() {
 
       if (unmatchedNames.length > 0) {
         setImageParseError(
-          `매칭 실패 선수(임시 게스트로 등록됨): ${unmatchedNames.join(', ')}\n` +
-          `편집 모드에서 수동으로 수정해주세요.`,
+          `매칭 실패 선수(임시 게스트로 등록됨): ${unmatchedNames.join(', ')}\n편집 모드에서 수동으로 수정해주세요.`,
         );
       }
 
-      load();
-      setTab('bracket');
+      // 저장된 경기를 불러와 팀 배정 화면 열기
+      const freshMatches = await getMatches(session.id);
+      load(); // 세션 정보 갱신 (백그라운드)
+      openTeamSetup(freshMatches);
     } catch (err) {
       setImageParseError(err instanceof Error ? err.message : '알 수 없는 오류');
     } finally {
@@ -1732,6 +1795,69 @@ export default function SessionDetailPage() {
         );
       })()}
 
+      {/* 팀 배정 모달 */}
+      {showTeamSetup && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-[60] p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-lg flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between shrink-0">
+              <div>
+                <h2 className="font-bold text-slate-800 text-lg">팀 배정</h2>
+                <p className="text-xs text-slate-400 mt-0.5">🔄 버튼으로 팀 조합을 선택하세요</p>
+              </div>
+              <button onClick={() => setShowTeamSetup(false)} className="text-slate-400 hover:text-slate-600 text-xl font-bold mt-0.5">✕</button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-4 py-4 space-y-3">
+              {teamSetupItems.map((item, idx) => {
+                const rotations = getTeamRotations(item.players, item.matchType);
+                const cur = rotations[item.rotation % rotations.length];
+                const typeLabel = item.matchType === 'male' ? '남복' : item.matchType === 'female' ? '여복' : '혼복';
+                const totalCombos = rotations.length;
+                return (
+                  <div key={item.matchId} className="bg-slate-50 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-xs font-semibold text-slate-500">
+                        {item.round}R · {item.court}코트 · {typeLabel}
+                      </span>
+                      <button
+                        onClick={() => setTeamSetupItems(prev =>
+                          prev.map((it, i) => i === idx ? { ...it, rotation: (it.rotation + 1) % totalCombos } : it)
+                        )}
+                        className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors"
+                      >
+                        🔄 팀 변경 <span className="text-blue-400">({item.rotation % totalCombos + 1}/{totalCombos})</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-blue-50 border border-blue-100 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-blue-400 font-medium mb-1">팀 1</p>
+                        <p className="text-sm font-semibold text-blue-700">{cur.team1[0].name}</p>
+                        <p className="text-sm font-semibold text-blue-700">{cur.team1[1].name}</p>
+                      </div>
+                      <span className="text-slate-400 font-bold text-sm shrink-0">vs</span>
+                      <div className="flex-1 bg-rose-50 border border-rose-100 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-rose-400 font-medium mb-1">팀 2</p>
+                        <p className="text-sm font-semibold text-rose-700">{cur.team2[0].name}</p>
+                        <p className="text-sm font-semibold text-rose-700">{cur.team2[1].name}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 shrink-0">
+              <button
+                onClick={handleTeamSetupSave}
+                className="w-full py-3 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors text-sm"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Groups Tab */}
       {tab === 'groups' && session.gameMode === 'group' && isAdminUser && (
         <GroupsTab
@@ -1826,6 +1952,15 @@ export default function SessionDetailPage() {
                   className="bg-indigo-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-indigo-700 transition-colors"
                 >
                   월요일 편성
+                </button>
+              )}
+              {/* 팀 배정 버튼 - 로그인한 모든 사용자 */}
+              {user && matches.length > 0 && !editMode && (
+                <button
+                  onClick={() => openTeamSetup(matches)}
+                  className="bg-blue-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-600 transition-colors"
+                >
+                  팀 배정
                 </button>
               )}
               {isAdminUser && !editMode && (

@@ -1,6 +1,6 @@
+import { supabase } from '../lib/supabase';
 import type { Match, Player, MatchType } from '../types';
 
-// 파싱 결과 타입
 export interface ParsedPlayer {
   name: string;
   gender: 'male' | 'female';
@@ -13,62 +13,22 @@ export interface ParsedBracket {
 }
 
 /**
- * 칠판 대진표 사진을 Gemini Vision API로 파싱.
- * - 왼쪽 열: 남자 선수 (gender: "male")
- * - 오른쪽 열: 여자 선수 (gender: "female")
- * - 각 행: 이름 + 라운드별 코트번호 (숫자=코트, -=휴식)
+ * 칠판 대진표 사진을 Supabase Edge Function(parse-bracket)을 통해 파싱.
+ * - API 키는 서버사이드에만 존재 (GEMINI_API_KEY Supabase secret)
+ * - 왼쪽 열: 남자 / 오른쪽 열: 여자 / 숫자: 코트번호 / -: 휴식
  */
 export async function parseBracketImage(
   imageBase64: string,
   mediaType: string,
 ): Promise<ParsedBracket> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) throw new Error('Gemini API 키가 설정되지 않았습니다. 관리자에게 문의하세요.');
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          {
-            inline_data: {
-              mime_type: mediaType,
-              data: imageBase64,
-            },
-          },
-          {
-            text: `테니스 대진표가 적힌 칠판 사진입니다.
-규칙:
-- 왼쪽 열: 남자 선수 → gender: "male"
-- 오른쪽 열: 여자 선수 → gender: "female"
-- 각 행 형식: 선수이름 + 라운드별 코트번호 (공백으로 구분)
-- 숫자(1~4): 해당 라운드 배정 코트번호
-- 하이픈(-): 해당 라운드 휴식 → null
-
-아래 JSON 형식으로만 응답해주세요 (설명 없이, JSON만):
-{"players":[{"name":"이름","gender":"male","courts":[1,2,null,3,1]},{"name":"이름","gender":"female","courts":[3,null,3,2,3]}]}`,
-          },
-        ],
-      }],
-      generationConfig: { temperature: 0 },
-    }),
+  const { data, error } = await supabase.functions.invoke('parse-bracket', {
+    body: { imageBase64, mediaType },
   });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    const msg = (err as { error?: { message?: string } })?.error?.message;
-    throw new Error(msg || `Gemini API 오류 (${response.status})`);
-  }
+  if (error) throw new Error(`대진표 인식 실패: ${error.message}`);
+  if (data?.error) throw new Error(data.error);
 
-  const data = await response.json() as {
-    candidates: { content: { parts: { text: string }[] } }[];
-  };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
-
-  // JSON 블록 추출 (마크다운 코드블록 또는 순수 JSON)
+  const text: string = data?.text ?? '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('AI 응답을 파싱할 수 없습니다. 다시 시도해주세요.');
 
@@ -79,9 +39,8 @@ export async function parseBracketImage(
 }
 
 /**
- * 파싱된 칠판 데이터 → Match 배열 변환.
- * knownPlayers: 현재 세션 멤버+게스트 목록으로 이름 매칭.
- * 매칭 실패 시 임시 guest Player 생성 (id: "img_이름").
+ * 파싱된 데이터 → Match 배열 변환.
+ * 팀 배정은 임의(rotation=0)로 초기화되며 이후 팀 배정 UI에서 조정.
  */
 export function buildMatchesFromParsed(
   sessionId: string,
@@ -93,20 +52,10 @@ export function buildMatchesFromParsed(
 
   const resolvePlayer = (name: string, gender: 'male' | 'female'): Player => {
     if (cache.has(name)) return cache.get(name)!;
-
-    // 정확히 일치 → 이름 포함 관계 순으로 매칭
     const found =
       knownPlayers.find(p => p.name === name) ||
       knownPlayers.find(p => p.name.includes(name) || name.includes(p.name));
-
-    const player: Player = found ?? {
-      id: `img_${name}`,
-      name,
-      gender,
-      ntrp: 3.0,
-      type: 'guest',
-    };
-
+    const player: Player = found ?? { id: `img_${name}`, name, gender, ntrp: 3.0, type: 'guest' };
     if (!found) unmatchedNames.push(name);
     cache.set(name, player);
     return player;
@@ -115,7 +64,6 @@ export function buildMatchesFromParsed(
   const allMatches: Omit<Match, 'id'>[] = [];
 
   for (let round = 1; round <= parsed.rounds; round++) {
-    // 코트번호별로 선수 그룹핑
     const courtMap = new Map<number, ParsedPlayer[]>();
     for (const p of parsed.players) {
       const court = p.courts[round - 1];
@@ -126,31 +74,26 @@ export function buildMatchesFromParsed(
     }
 
     for (const [court, group] of courtMap.entries()) {
-      if (group.length !== 4) continue; // 4명이 아니면 스킵
+      if (group.length !== 4) continue;
 
       const resolved = group.map(p => resolvePlayer(p.name, p.gender));
       const maleCount = resolved.filter(p => p.gender === 'male').length;
       const matchType: MatchType =
         maleCount === 4 ? 'male' : maleCount === 0 ? 'female' : 'mixed';
 
+      // 초기 배정 (rotation=0): 실제 팀은 팀 배정 UI에서 결정
       let t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player;
-
       if (matchType === 'mixed') {
-        // 혼복: 남1+여1 vs 남1+여1
         const males = resolved.filter(p => p.gender === 'male');
         const females = resolved.filter(p => p.gender === 'female');
         t1p1 = males[0]; t1p2 = females[0];
         t2p1 = males[1]; t2p2 = females[1];
       } else {
-        // 남복/여복: 앞 2명 vs 뒤 2명 (임의 — 실제 팀은 게임 전 결정)
         [t1p1, t1p2, t2p1, t2p2] = resolved as [Player, Player, Player, Player];
       }
 
       allMatches.push({
-        sessionId,
-        round,
-        court,
-        matchType,
+        sessionId, round, court, matchType,
         team1: { player1: t1p1, player2: t1p2 },
         team2: { player1: t2p1, player2: t2p2 },
         isCompleted: false,
@@ -158,8 +101,6 @@ export function buildMatchesFromParsed(
     }
   }
 
-  // 라운드 → 코트 순 정렬
   allMatches.sort((a, b) => a.round - b.round || a.court - b.court);
-
   return { matches: allMatches, unmatchedNames: [...new Set(unmatchedNames)] };
 }
