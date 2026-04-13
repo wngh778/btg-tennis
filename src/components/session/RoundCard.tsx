@@ -26,6 +26,11 @@ export function PlayerBadge({
   onDragStart?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
 }) {
+  // player 데이터가 없는 경우 (불량 DB 데이터) 빈 placeholder 표시
+  if (!player) {
+    return <div className="text-xs text-slate-400 px-1.5 py-0.5">-</div>;
+  }
+
   const content = (
     <div className="flex items-center gap-1.5">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />

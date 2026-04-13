@@ -78,24 +78,47 @@ export async function parseBracketImage(
 }
 
 /**
+ * 칠판에 쓰인 이름과 알려진 선수 목록을 매칭.
+ * - 정확히 일치 우선
+ * - 회원은 이름만(철수) / 게스트는 성+이름(김철수)으로 쓸 수 있으므로
+ *   부분 포함 여부로 2차 매칭 (최소 2자 이상)
+ */
+function matchKnownPlayer(parsedName: string, knownPlayers: Player[]): Player | undefined {
+  if (!parsedName) return undefined;
+
+  // 1. 정확히 일치
+  const exact = knownPlayers.find(p => p.name === parsedName);
+  if (exact) return exact;
+
+  // 2. DB 이름이 칠판 이름 안에 포함 (예: DB="철수", 칠판="김철수")
+  const dbInParsed = knownPlayers.find(p => p.name.length >= 2 && parsedName.includes(p.name));
+  if (dbInParsed) return dbInParsed;
+
+  // 3. 칠판 이름이 DB 이름 안에 포함 (예: DB="김철수", 칠판="철수")
+  const parsedInDb = knownPlayers.find(p => parsedName.length >= 2 && p.name.includes(parsedName));
+  if (parsedInDb) return parsedInDb;
+
+  return undefined;
+}
+
+/**
  * 파싱된 데이터 → Match 배열 변환.
  * 팀 배정은 임의(rotation=0)로 초기화되며 이후 팀 배정 UI에서 조정.
+ * unmatchedPlayers: 회원 목록에 없어 새로 추가해야 할 선수 목록 (이름+성별)
  */
 export function buildMatchesFromParsed(
   sessionId: string,
   parsed: ParsedBracket,
   knownPlayers: Player[],
-): { matches: Omit<Match, 'id'>[]; unmatchedNames: string[] } {
-  const unmatchedNames: string[] = [];
+): { matches: Omit<Match, 'id'>[]; unmatchedPlayers: { name: string; gender: 'male' | 'female' }[] } {
+  const unmatchedSet = new Map<string, 'male' | 'female'>(); // name → gender
   const cache = new Map<string, Player>();
 
   const resolvePlayer = (name: string, gender: 'male' | 'female'): Player => {
     if (cache.has(name)) return cache.get(name)!;
-    const found =
-      knownPlayers.find(p => p.name === name) ||
-      knownPlayers.find(p => p.name.includes(name) || name.includes(p.name));
+    const found = matchKnownPlayer(name, knownPlayers);
     const player: Player = found ?? { id: `img_${name}`, name, gender, ntrp: 3.0, type: 'guest' };
-    if (!found) unmatchedNames.push(name);
+    if (!found) unmatchedSet.set(name, gender);
     cache.set(name, player);
     return player;
   };
@@ -141,5 +164,6 @@ export function buildMatchesFromParsed(
   }
 
   allMatches.sort((a, b) => a.round - b.round || a.court - b.court);
-  return { matches: allMatches, unmatchedNames: [...new Set(unmatchedNames)] };
+  const unmatchedPlayers = Array.from(unmatchedSet.entries()).map(([name, gender]) => ({ name, gender }));
+  return { matches: allMatches, unmatchedPlayers };
 }

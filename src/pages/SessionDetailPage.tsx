@@ -335,7 +335,7 @@ export default function SessionDetailPage() {
       const parsed = await parseBracketImage(base64, mediaType);
 
       // 현재 세션 멤버+게스트 전체를 Player 목록으로 만들어 이름 매칭에 활용
-      const allKnownPlayers = [
+      const allKnownPlayers: { id: string; name: string; gender: 'male' | 'female'; ntrp: number; type: 'member' | 'guest' }[] = [
         ...members.filter(m => m.isActive).map(m => ({
           id: m.id, name: m.name, gender: m.gender, ntrp: m.ntrp, type: 'member' as const,
         })),
@@ -344,11 +344,17 @@ export default function SessionDetailPage() {
         })),
       ];
 
-      const { matches: generated, unmatchedNames } = buildMatchesFromParsed(
-        session.id,
-        parsed,
-        allKnownPlayers,
-      );
+      // 1차 빌드: 매칭 안 된 선수 파악
+      const { unmatchedPlayers } = buildMatchesFromParsed(session.id, parsed, allKnownPlayers);
+
+      // 매칭 안 된 선수를 게스트로 DB에 추가 후 knownPlayers 목록 갱신
+      for (const p of unmatchedPlayers) {
+        const guestId = await addGuest({ name: p.name, gender: p.gender, ntrp: 3.0, sessionId: session.id });
+        allKnownPlayers.push({ id: guestId, name: p.name, gender: p.gender, ntrp: 3.0, type: 'guest' });
+      }
+
+      // 2차 빌드: 실제 DB ID로 매칭된 경기 목록
+      const { matches: generated } = buildMatchesFromParsed(session.id, parsed, allKnownPlayers);
 
       if (generated.length === 0) {
         throw new Error('대진표를 인식하지 못했습니다. 사진을 더 선명하게 찍어 다시 시도해주세요.');
@@ -367,13 +373,12 @@ export default function SessionDetailPage() {
       await updateSession(session.id, {
         isGenerated: true,
         rounds: parsed.rounds,
-        // courts는 파싱된 최대 코트번호로 업데이트
         courts: Math.max(...generated.map(m => m.court), session.courts),
       });
 
-      if (unmatchedNames.length > 0) {
+      if (unmatchedPlayers.length > 0) {
         setImageParseError(
-          `매칭 실패 선수(임시 게스트로 등록됨): ${unmatchedNames.join(', ')}\n편집 모드에서 수동으로 수정해주세요.`,
+          `새 게스트 자동 추가됨: ${unmatchedPlayers.map(p => p.name).join(', ')}`,
         );
       }
 
