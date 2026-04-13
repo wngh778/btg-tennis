@@ -254,9 +254,17 @@ export default function SessionDetailPage() {
   // 4명의 플레이어로 가능한 팀 조합 반환
   // 혼복: 남+여 짝 2가지 / 남복·여복: 3가지
   const getTeamRotations = (players: Player[], matchType: MatchType) => {
+    // undefined/null 방어 — DB에서 player 데이터가 누락된 경우
+    const valid = players.filter((p): p is Player => !!p);
+    if (valid.length < 4) {
+      // 선수 데이터 불완전: 단순 2vs2 조합만 반환
+      const padded: Player[] = [...valid];
+      while (padded.length < 4) padded.push(valid[padded.length % Math.max(valid.length, 1)]);
+      return [{ team1: [padded[0], padded[1]], team2: [padded[2], padded[3]] }];
+    }
     if (matchType === 'mixed') {
-      const males = players.filter(p => p.gender === 'male');
-      const females = players.filter(p => p.gender === 'female');
+      const males = valid.filter(p => p.gender === 'male');
+      const females = valid.filter(p => p.gender === 'female');
       if (males.length >= 2 && females.length >= 2) {
         return [
           { team1: [males[0], females[0]], team2: [males[1], females[1]] },
@@ -265,15 +273,17 @@ export default function SessionDetailPage() {
       }
     }
     return [
-      { team1: [players[0], players[1]], team2: [players[2], players[3]] },
-      { team1: [players[0], players[2]], team2: [players[1], players[3]] },
-      { team1: [players[0], players[3]], team2: [players[1], players[2]] },
+      { team1: [valid[0], valid[1]], team2: [valid[2], valid[3]] },
+      { team1: [valid[0], valid[2]], team2: [valid[1], valid[3]] },
+      { team1: [valid[0], valid[3]], team2: [valid[1], valid[2]] },
     ];
   };
 
   const openTeamSetup = (sourceMatches: Match[]) => {
     const items = sourceMatches
       .filter(m => !m.isCompleted)
+      // team1/team2 player 데이터가 모두 있는 경기만 포함
+      .filter(m => m.team1?.player1 && m.team1?.player2 && m.team2?.player1 && m.team2?.player2)
       .sort((a, b) => a.round - b.round || a.court - b.court)
       .map(m => ({
         matchId: m.id,
