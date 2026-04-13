@@ -79,8 +79,7 @@ export default function SessionDetailPage() {
   const [editGuestGender, setEditGuestGender] = useState<Gender>('male');
   const [editGuestNtrp, setEditGuestNtrp] = useState(3.0);
 
-  // AI recommendation
-  const [aiRecommendLoading, setAiRecommendLoading] = useState(false);
+  // 조건 추천 메시지
   const [aiRecommendMsg, setAiRecommendMsg] = useState<string | null>(null);
 
   // Manual bracket builder modal
@@ -657,61 +656,35 @@ export default function SessionDetailPage() {
     load();
   };
 
-  // --- AI Recommendation ---
-  const handleAiRecommend = async () => {
+  // --- 자동 조건 추천 (앱 내장 알고리즘, 외부 API 불필요) ---
+  const handleAiRecommend = () => {
     const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
     const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
-    if (maleCount + femaleCount === 0) { alert('참석자가 없습니다.'); return; }
+    const total = maleCount + femaleCount;
+    if (total < 4) { alert('참석자가 4명 이상이어야 합니다.'); return; }
 
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string;
-    if (!apiKey) { alert('VITE_GEMINI_API_KEY가 설정되지 않았습니다.'); return; }
-
-    setAiRecommendLoading(true);
     setAiRecommendMsg(null);
-    try {
-      const prompt = `테니스 복식 대진표 최적 조건 추천.
-참석: 남자 ${maleCount}명, 여자 ${femaleCount}명 (합계 ${maleCount + femaleCount}명)
-규칙: 4인 복식, 코트당 동시에 4명, 코트 수 2~4개, 라운드 수 4~8개
-목표: 남녀 평균 경기 수 차이 1 이하
-JSON만 응답:
-{"courts":숫자,"rounds":숫자,"mixedRounds":숫자,"reason":"한 줄 이유"}`;
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0 },
-          }),
-        }
-      );
-      const data = await res.json() as {
-        candidates?: { content: { parts: { text: string }[] } }[];
-        error?: { message: string };
-      };
-      if (data.error) throw new Error(data.error.message);
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error('AI 응답 파싱 실패');
-      const rec = JSON.parse(match[0]) as {
-        courts: number;
-        rounds: number;
-        mixedRounds: number;
-        reason: string;
-      };
-      setGenerateCourts(rec.courts);
-      setGenerateRounds(rec.rounds);
-      setGenerateMixedRounds(rec.mixedRounds);
-      setAiRecommendMsg(
-        `코트 ${rec.courts}개 · 라운드 ${rec.rounds}개 · 혼복 ${rec.mixedRounds}라운드 — ${rec.reason}`
-      );
-    } catch (e) {
-      alert('AI 추천 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setAiRecommendLoading(false);
-    }
+    // 코트 수: 전원이 최대한 뛸 수 있도록 (최대 4코트)
+    const courts = Math.max(2, Math.min(4, Math.floor(total / 4)));
+
+    // 라운드 수: 1인당 평균 4~5경기 목표
+    const slotsPerRound = courts * 4;
+    const utilization = slotsPerRound / total; // 한 라운드에 뛰는 비율
+    const targetGames = 5;
+    const rounds = Math.max(4, Math.min(8, Math.round(targetGames / utilization)));
+
+    // 혼복 라운드: 남녀 경기 수 차이 ≤1 되는 최솟값
+    const mixedRounds = findOptimalMixedRounds(maleCount, femaleCount, courts, rounds);
+    const { maleAvg, femaleAvg } = calculateExpectedGames(maleCount, femaleCount, courts, rounds, mixedRounds);
+
+    setGenerateCourts(courts);
+    setGenerateRounds(rounds);
+    setGenerateMixedRounds(mixedRounds);
+    setAiRecommendMsg(
+      `코트 ${courts}개 · 라운드 ${rounds}개 · 혼복 ${mixedRounds}라운드` +
+      ` — 남 평균 ${maleAvg.toFixed(1)}경기 / 여 평균 ${femaleAvg.toFixed(1)}경기`
+    );
   };
 
   // --- Manual Bracket Builder ---
@@ -1582,10 +1555,10 @@ JSON만 응답:
                 <>
                   <button
                     onClick={handleAiRecommend}
-                    disabled={aiRecommendLoading || attendingPlayers.length === 0}
+                    disabled={attendingPlayers.length === 0}
                     className="w-full py-2 rounded-lg text-sm font-medium bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
                   >
-                    {aiRecommendLoading ? '⏳ AI 분석 중...' : '✨ AI 최적 조건 추천'}
+                    ✨ 최적 조건 자동 추천
                   </button>
                   {aiRecommendMsg && (
                     <div className="p-2 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-700">
@@ -1965,32 +1938,46 @@ JSON만 응답:
                               ))}
                             </div>
                           )}
-                          {/* 선수 선택 목록 */}
-                          {slotPlayers.length < 4 && (
-                            <div className="flex flex-wrap gap-1">
-                              {attendingPlayers.map(p => {
-                                const inThisSlot = slotPlayers.some(sp => sp.id === p.id);
-                                const inOtherSlot = !inThisSlot && assignedInRound.has(p.id);
-                                if (inThisSlot) return null;
-                                return (
-                                  <button
-                                    key={p.id}
-                                    onClick={() => !inOtherSlot && handleManualTogglePlayer(manualActiveRound, c, p)}
-                                    disabled={inOtherSlot}
-                                    className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                                      inOtherSlot
-                                        ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed opacity-50'
-                                        : p.gender === 'male'
-                                        ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
-                                        : 'bg-pink-50 text-pink-600 border-pink-200 hover:bg-pink-100'
-                                    }`}
-                                  >
-                                    {p.name}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
+                          {/* 선수 선택 목록 - 남/여 구분 */}
+                          {slotPlayers.length < 4 && (() => {
+                            const males = attendingPlayers.filter(p => p.gender === 'male' && !slotPlayers.some(sp => sp.id === p.id));
+                            const females = attendingPlayers.filter(p => p.gender === 'female' && !slotPlayers.some(sp => sp.id === p.id));
+                            const renderBtn = (p: Player) => {
+                              const inOtherSlot = assignedInRound.has(p.id);
+                              return (
+                                <button
+                                  key={p.id}
+                                  onClick={() => !inOtherSlot && handleManualTogglePlayer(manualActiveRound, c, p)}
+                                  disabled={inOtherSlot}
+                                  className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                                    inOtherSlot
+                                      ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed opacity-50'
+                                      : p.gender === 'male'
+                                      ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                                      : 'bg-pink-50 text-pink-600 border-pink-200 hover:bg-pink-100'
+                                  }`}
+                                >
+                                  {p.name}
+                                </button>
+                              );
+                            };
+                            return (
+                              <div className="space-y-1.5">
+                                {males.length > 0 && (
+                                  <div>
+                                    <span className="text-xs text-blue-400 font-medium mr-1">남</span>
+                                    <span className="inline-flex flex-wrap gap-1">{males.map(renderBtn)}</span>
+                                  </div>
+                                )}
+                                {females.length > 0 && (
+                                  <div>
+                                    <span className="text-xs text-pink-400 font-medium mr-1">여</span>
+                                    <span className="inline-flex flex-wrap gap-1">{females.map(renderBtn)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
