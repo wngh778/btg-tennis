@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
@@ -24,9 +24,18 @@ document.addEventListener('visibilitychange', () => {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, isAdminUser, isSuperAdmin, logout } = useAuth();
   const { currentClub, availableClubs, setCurrentClub } = useClub();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const handleClubChange = (clubId: string) => {
+    const club = availableClubs.find(c => c.id === clubId);
+    if (club && club.id !== currentClub?.id) {
+      setCurrentClub(club);
+      navigate('/'); // 클럽 변경 시 홈으로 이동 (자동 새로고침)
+    }
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -71,10 +80,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {availableClubs.length > 1 && currentClub && (
                     <select
                       value={currentClub.id}
-                      onChange={e => {
-                        const club = availableClubs.find(c => c.id === e.target.value);
-                        if (club) setCurrentClub(club);
-                      }}
+                      onChange={e => handleClubChange(e.target.value)}
                       className="ml-1 px-2 py-1.5 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:ring-2 focus:ring-white/30"
                     >
                       {availableClubs.map(c => (
@@ -145,10 +151,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {availableClubs.length > 1 && currentClub && (
                     <select
                       value={currentClub.id}
-                      onChange={e => {
-                        const club = availableClubs.find(c => c.id === e.target.value);
-                        if (club) setCurrentClub(club);
-                      }}
+                      onChange={e => handleClubChange(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none"
                     >
                       {availableClubs.map(c => (

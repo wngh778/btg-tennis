@@ -1975,7 +1975,6 @@ export default function SessionDetailPage() {
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
                       className="hidden"
                       disabled={imageParseLoading}
                       onChange={handleImageBracketUpload}
