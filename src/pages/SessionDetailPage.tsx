@@ -9,7 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
-import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
+import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup, MatchType } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
 import { RoundCard } from '../components/session/RoundCard';
@@ -78,6 +78,30 @@ export default function SessionDetailPage() {
   const [editGuestName, setEditGuestName] = useState('');
   const [editGuestGender, setEditGuestGender] = useState<Gender>('male');
   const [editGuestNtrp, setEditGuestNtrp] = useState(3.0);
+
+  // AI recommendation
+  const [aiRecommendLoading, setAiRecommendLoading] = useState(false);
+  const [aiRecommendMsg, setAiRecommendMsg] = useState<string | null>(null);
+
+  // Manual bracket builder modal
+  const [showManualMode, setShowManualMode] = useState(false);
+  const [manualStep, setManualStep] = useState<'setup' | 'assign'>('setup');
+  const [manualRounds, setManualRounds] = useState(5);
+  const [manualCourts, setManualCourts] = useState(3);
+  const [manualActiveRound, setManualActiveRound] = useState(1);
+  // key: `${round}_${court}`, value: Player 배열 (최대 4명)
+  const [manualSlots, setManualSlots] = useState<Record<string, Player[]>>({});
+
+  // Team setup modal
+  const [showTeamSetup, setShowTeamSetup] = useState(false);
+  const [teamSetupItems, setTeamSetupItems] = useState<{
+    matchId: string;
+    round: number;
+    court: number;
+    matchType: MatchType;
+    players: Player[];
+    rotation: number;
+  }[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -631,6 +655,178 @@ export default function SessionDetailPage() {
       for (const m of toDelete) await deleteMatch(m.id);
     }
     load();
+  };
+
+  // --- AI Recommendation ---
+  const handleAiRecommend = async () => {
+    const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
+    const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
+    if (maleCount + femaleCount === 0) { alert('참석자가 없습니다.'); return; }
+
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string;
+    if (!apiKey) { alert('VITE_GEMINI_API_KEY가 설정되지 않았습니다.'); return; }
+
+    setAiRecommendLoading(true);
+    setAiRecommendMsg(null);
+    try {
+      const prompt = `테니스 복식 대진표 최적 조건 추천.
+참석: 남자 ${maleCount}명, 여자 ${femaleCount}명 (합계 ${maleCount + femaleCount}명)
+규칙: 4인 복식, 코트당 동시에 4명, 코트 수 2~4개, 라운드 수 4~8개
+목표: 남녀 평균 경기 수 차이 1 이하
+JSON만 응답:
+{"courts":숫자,"rounds":숫자,"mixedRounds":숫자,"reason":"한 줄 이유"}`;
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0 },
+          }),
+        }
+      );
+      const data = await res.json() as {
+        candidates?: { content: { parts: { text: string }[] } }[];
+        error?: { message: string };
+      };
+      if (data.error) throw new Error(data.error.message);
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('AI 응답 파싱 실패');
+      const rec = JSON.parse(match[0]) as {
+        courts: number;
+        rounds: number;
+        mixedRounds: number;
+        reason: string;
+      };
+      setGenerateCourts(rec.courts);
+      setGenerateRounds(rec.rounds);
+      setGenerateMixedRounds(rec.mixedRounds);
+      setAiRecommendMsg(
+        `코트 ${rec.courts}개 · 라운드 ${rec.rounds}개 · 혼복 ${rec.mixedRounds}라운드 — ${rec.reason}`
+      );
+    } catch (e) {
+      alert('AI 추천 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setAiRecommendLoading(false);
+    }
+  };
+
+  // --- Manual Bracket Builder ---
+  const handleManualTogglePlayer = (round: number, court: number, player: Player) => {
+    const key = `${round}_${court}`;
+    setManualSlots(prev => {
+      const current = prev[key] ?? [];
+      const exists = current.find(p => p.id === player.id);
+      if (exists) {
+        return { ...prev, [key]: current.filter(p => p.id !== player.id) };
+      }
+      if (current.length >= 4) return prev;
+      return { ...prev, [key]: [...current, player] };
+    });
+  };
+
+  const handleManualSave = async () => {
+    const generated: Omit<Match, 'id'>[] = [];
+    for (let r = 1; r <= manualRounds; r++) {
+      for (let c = 1; c <= manualCourts; c++) {
+        const players = manualSlots[`${r}_${c}`] ?? [];
+        if (players.length !== 4) continue;
+        const maleCnt = players.filter(p => p.gender === 'male').length;
+        const matchType: MatchType = maleCnt === 4 ? 'male' : maleCnt === 0 ? 'female' : 'mixed';
+        let t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player;
+        if (matchType === 'mixed') {
+          const males = players.filter(p => p.gender === 'male');
+          const females = players.filter(p => p.gender === 'female');
+          t1p1 = males[0]; t1p2 = females[0];
+          t2p1 = males[1]; t2p2 = females[1];
+        } else {
+          [t1p1, t1p2, t2p1, t2p2] = players as [Player, Player, Player, Player];
+        }
+        generated.push({
+          sessionId: session!.id,
+          round: r,
+          court: c,
+          matchType,
+          team1: { player1: t1p1, player2: t1p2 },
+          team2: { player1: t2p1, player2: t2p2 },
+          isCompleted: false,
+        });
+      }
+    }
+    if (generated.length === 0) { alert('배정된 경기가 없습니다.'); return; }
+    if (matches.length > 0) {
+      if (!confirm(`기존 대진표(${matches.length}경기)를 교체하시겠습니까?`)) return;
+    }
+    await saveMatches(session!.id, generated);
+    await updateSession(session!.id, {
+      isGenerated: true,
+      rounds: manualRounds,
+      courts: manualCourts,
+    });
+    setShowManualMode(false);
+    setManualSlots({});
+    setManualStep('setup');
+    load();
+    setTab('bracket');
+  };
+
+  // --- Team Setup ---
+  const getTeamRotations = (players: Player[], matchType: MatchType) => {
+    const valid = players.filter((p): p is Player => !!p);
+    if (valid.length < 4) {
+      const padded = [...valid];
+      while (padded.length < 4) padded.push(valid[padded.length % Math.max(valid.length, 1)]);
+      return [{ team1: [padded[0], padded[1]] as Player[], team2: [padded[2], padded[3]] as Player[] }];
+    }
+    if (matchType === 'mixed') {
+      const males = valid.filter(p => p.gender === 'male');
+      const females = valid.filter(p => p.gender === 'female');
+      if (males.length >= 2 && females.length >= 2) {
+        return [
+          { team1: [males[0], females[0]] as Player[], team2: [males[1], females[1]] as Player[] },
+          { team1: [males[0], females[1]] as Player[], team2: [males[1], females[0]] as Player[] },
+        ];
+      }
+    }
+    return [
+      { team1: [valid[0], valid[1]] as Player[], team2: [valid[2], valid[3]] as Player[] },
+      { team1: [valid[0], valid[2]] as Player[], team2: [valid[1], valid[3]] as Player[] },
+      { team1: [valid[0], valid[3]] as Player[], team2: [valid[1], valid[2]] as Player[] },
+    ];
+  };
+
+  const openTeamSetup = (sourceMatches: Match[]) => {
+    const items = sourceMatches
+      .filter(m => !m.isCompleted)
+      .filter(m => m.team1?.player1 && m.team1?.player2 && m.team2?.player1 && m.team2?.player2)
+      .sort((a, b) => a.round - b.round || a.court - b.court)
+      .map(m => ({
+        matchId: m.id,
+        round: m.round,
+        court: m.court,
+        matchType: m.matchType,
+        players: [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2],
+        rotation: 0,
+      }));
+    setTeamSetupItems(items);
+    setShowTeamSetup(true);
+  };
+
+  const handleTeamSetupSave = async () => {
+    for (const item of teamSetupItems) {
+      const rotations = getTeamRotations(item.players, item.matchType);
+      const { team1, team2 } = rotations[item.rotation % rotations.length];
+      await updateMatch(item.matchId, {
+        team1: { player1: team1[0], player2: team1[1] },
+        team2: { player1: team2[0], player2: team2[1] },
+      });
+    }
+    setShowTeamSetup(false);
+    load();
+    setTab('bracket');
   };
 
   const loadGroups = async () => {
@@ -1381,6 +1577,23 @@ export default function SessionDetailPage() {
               <p className="text-sm text-slate-500 mt-0.5">참석 인원 {attendingPlayers.length}명 · 남{maleAttending} 여{femaleAttending}</p>
             </div>
             <div className="px-6 py-5 space-y-4">
+              {/* AI 추천 버튼 */}
+              {session.gameMode !== 'group' && (
+                <>
+                  <button
+                    onClick={handleAiRecommend}
+                    disabled={aiRecommendLoading || attendingPlayers.length === 0}
+                    className="w-full py-2 rounded-lg text-sm font-medium bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
+                  >
+                    {aiRecommendLoading ? '⏳ AI 분석 중...' : '✨ AI 최적 조건 추천'}
+                  </button>
+                  {aiRecommendMsg && (
+                    <div className="p-2 rounded-lg bg-purple-50 border border-purple-100 text-xs text-purple-700">
+                      {aiRecommendMsg}
+                    </div>
+                  )}
+                </>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">코트 수</label>
                 <div className="flex gap-2">
@@ -1652,6 +1865,240 @@ export default function SessionDetailPage() {
         );
       })()}
 
+      {/* Manual Bracket Builder Modal */}
+      {showManualMode && (() => {
+        // 이미 다른 슬롯에 배정된 선수 ID 집합 (현재 라운드 전체)
+        const assignedInRound = new Set<string>();
+        for (let c = 1; c <= manualCourts; c++) {
+          const key = `${manualActiveRound}_${c}`;
+          (manualSlots[key] ?? []).forEach(p => assignedInRound.add(p.id));
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+                <h3 className="font-semibold text-slate-800">수기 입력</h3>
+                <button onClick={() => setShowManualMode(false)} className="text-slate-400 hover:text-slate-600 text-sm">닫기</button>
+              </div>
+
+              {manualStep === 'setup' ? (
+                <div className="px-5 py-5 space-y-5">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">라운드 수</label>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setManualRounds(prev => Math.max(1, prev - 1))}
+                        className="w-10 h-10 rounded-lg bg-slate-100 text-slate-700 text-xl font-bold hover:bg-slate-200 transition-colors"
+                      >−</button>
+                      <span className="text-2xl font-bold text-slate-800 w-12 text-center">{manualRounds}</span>
+                      <button
+                        onClick={() => setManualRounds(prev => prev + 1)}
+                        className="w-10 h-10 rounded-lg bg-slate-100 text-slate-700 text-xl font-bold hover:bg-slate-200 transition-colors"
+                      >+</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">코트 수</label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <button
+                          key={n}
+                          onClick={() => setManualCourts(n)}
+                          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            manualCourts === n ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >{n}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="pt-2">
+                    <button
+                      onClick={() => { setManualStep('assign'); setManualActiveRound(1); }}
+                      className="w-full py-2.5 bg-orange-500 text-white rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors"
+                    >다음 →</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* 라운드 탭 */}
+                  <div className="flex gap-1 px-4 pt-3 overflow-x-auto shrink-0">
+                    {Array.from({ length: manualRounds }, (_, i) => i + 1).map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setManualActiveRound(r)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                          manualActiveRound === r ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >{r}R</button>
+                    ))}
+                  </div>
+
+                  {/* 코트 슬롯 */}
+                  <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                    {Array.from({ length: manualCourts }, (_, i) => i + 1).map(c => {
+                      const key = `${manualActiveRound}_${c}`;
+                      const slotPlayers = manualSlots[key] ?? [];
+                      return (
+                        <div key={c} className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                          <p className="text-xs font-semibold text-slate-500 mb-2">
+                            코트 {c}
+                            <span className={`ml-2 font-normal ${slotPlayers.length === 4 ? 'text-green-600' : 'text-slate-400'}`}>
+                              ({slotPlayers.length}/4명)
+                            </span>
+                          </p>
+                          {/* 선택된 선수 배지 */}
+                          {slotPlayers.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {slotPlayers.map(p => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => handleManualTogglePlayer(manualActiveRound, c, p)}
+                                  className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                                    p.gender === 'male'
+                                      ? 'bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200'
+                                      : 'bg-pink-100 text-pink-700 border-pink-200 hover:bg-pink-200'
+                                  }`}
+                                >
+                                  {p.name} ✕
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {/* 선수 선택 목록 */}
+                          {slotPlayers.length < 4 && (
+                            <div className="flex flex-wrap gap-1">
+                              {attendingPlayers.map(p => {
+                                const inThisSlot = slotPlayers.some(sp => sp.id === p.id);
+                                const inOtherSlot = !inThisSlot && assignedInRound.has(p.id);
+                                if (inThisSlot) return null;
+                                return (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => !inOtherSlot && handleManualTogglePlayer(manualActiveRound, c, p)}
+                                    disabled={inOtherSlot}
+                                    className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                                      inOtherSlot
+                                        ? 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed opacity-50'
+                                        : p.gender === 'male'
+                                        ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                                        : 'bg-pink-50 text-pink-600 border-pink-200 hover:bg-pink-100'
+                                    }`}
+                                  >
+                                    {p.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="px-4 py-3 border-t border-slate-100 flex gap-2 shrink-0">
+                    <button
+                      onClick={() => setManualStep('setup')}
+                      className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                    >이전</button>
+                    <button
+                      onClick={handleManualSave}
+                      className="flex-1 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors"
+                    >저장</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Team Setup Modal */}
+      {showTeamSetup && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="font-semibold text-slate-800">팀 배정</h3>
+                <p className="text-xs text-slate-500 mt-0.5">각 경기의 팀 구성을 선택하세요.</p>
+              </div>
+              <button onClick={() => setShowTeamSetup(false)} className="text-slate-400 hover:text-slate-600 text-sm">닫기</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {teamSetupItems.map((item, idx) => {
+                const rotations = getTeamRotations(item.players, item.matchType);
+                const current = rotations[item.rotation % rotations.length];
+                return (
+                  <div key={item.matchId} className="bg-slate-50 rounded-xl border border-slate-200 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-slate-600">
+                        {item.round}R · 코트{item.court}
+                        <span className={`ml-1.5 px-1.5 py-0.5 rounded text-xs ${
+                          item.matchType === 'mixed' ? 'bg-purple-100 text-purple-600' :
+                          item.matchType === 'male' ? 'bg-blue-100 text-blue-600' :
+                          'bg-pink-100 text-pink-600'
+                        }`}>
+                          {item.matchType === 'mixed' ? '혼복' : item.matchType === 'male' ? '남복' : '여복'}
+                        </span>
+                      </p>
+                      {rotations.length > 1 && (
+                        <button
+                          onClick={() =>
+                            setTeamSetupItems(prev =>
+                              prev.map((it, i) =>
+                                i === idx ? { ...it, rotation: it.rotation + 1 } : it
+                              )
+                            )
+                          }
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          팀 바꾸기
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
+                      <div className="space-y-1">
+                        {current.team1.map(p => (
+                          <div key={p.id} className={`px-2 py-1 rounded-lg text-xs font-medium text-center ${
+                            p.gender === 'male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
+                          }`}>
+                            {p.name}
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-slate-400 font-bold text-xs">vs</span>
+                      <div className="space-y-1">
+                        {current.team2.map(p => (
+                          <div key={p.id} className={`px-2 py-1 rounded-lg text-xs font-medium text-center ${
+                            p.gender === 'male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
+                          }`}>
+                            {p.name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {teamSetupItems.length === 0 && (
+                <p className="text-center text-slate-400 text-sm py-8">팀 배정할 미완료 경기가 없습니다.</p>
+              )}
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex gap-2 shrink-0">
+              <button
+                onClick={() => setShowTeamSetup(false)}
+                className="flex-1 py-2.5 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >취소</button>
+              <button
+                onClick={handleTeamSetupSave}
+                disabled={teamSetupItems.length === 0}
+                className="flex-1 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
+              >저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Groups Tab */}
       {tab === 'groups' && session.gameMode === 'group' && isAdminUser && (
         <GroupsTab
@@ -1738,6 +2185,29 @@ export default function SessionDetailPage() {
                   className="bg-blue-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
                   {session.isConfirmed ? '재확정' : '확정'}
+                </button>
+              )}
+              {user && matches.length > 0 && !editMode && (
+                <button
+                  onClick={() => openTeamSetup(matches)}
+                  className="bg-blue-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-600 transition-colors"
+                >
+                  팀 배정
+                </button>
+              )}
+              {isAdminUser && !editMode && (
+                <button
+                  onClick={() => {
+                    setShowManualMode(true);
+                    setManualStep('setup');
+                    setManualRounds(session.rounds);
+                    setManualCourts(session.courts);
+                    setManualActiveRound(1);
+                    setManualSlots({});
+                  }}
+                  className="bg-orange-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-orange-600 transition-colors"
+                >
+                  수기 입력
                 </button>
               )}
               {isSuperAdmin && !editMode && (
