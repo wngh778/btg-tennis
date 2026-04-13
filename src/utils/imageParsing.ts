@@ -16,10 +16,39 @@ export interface ParsedBracket {
  * - API 키는 서버사이드에만 존재 (GEMINI_API_KEY Supabase secret)
  * - 왼쪽 열: 남자 / 오른쪽 열: 여자 / 숫자: 코트번호 / -: 휴식
  */
+/**
+ * 이미지를 최대 1200px, JPEG quality 0.75로 압축하여 base64 반환.
+ * 브라우저 Canvas API 사용 — 폰 카메라 원본(5~8MB)을 Edge Function 제한 이내로 축소.
+ */
+async function compressImage(imageBase64: string, mediaType: string): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+        else { width = Math.round(width * MAX / height); height = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      resolve({ base64: dataUrl.split(',')[1], mediaType: 'image/jpeg' });
+    };
+    img.onerror = reject;
+    img.src = `data:${mediaType};base64,${imageBase64}`;
+  });
+}
+
 export async function parseBracketImage(
   imageBase64: string,
   mediaType: string,
 ): Promise<ParsedBracket> {
+  // 이미지 압축 (폰 카메라 원본이 너무 크면 Edge Function 요청 크기 제한 초과)
+  const compressed = await compressImage(imageBase64, mediaType);
+
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -29,7 +58,7 @@ export async function parseBracketImage(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${anonKey}`,
     },
-    body: JSON.stringify({ imageBase64, mediaType }),
+    body: JSON.stringify({ imageBase64: compressed.base64, mediaType: compressed.mediaType }),
   });
 
   const data = await res.json() as { text?: string; error?: string };
