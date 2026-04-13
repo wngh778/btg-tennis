@@ -359,6 +359,65 @@ function gcd(a: number, b: number): number {
 }
 
 /**
+ * 주간 경기에서 남녀 경기수 예상치를 계산.
+ * byLeastGames 정렬로 인해 슬롯이 균등 분배된다고 가정.
+ */
+export function calculateExpectedGames(
+  maleCount: number,
+  femaleCount: number,
+  courts: number,
+  totalRounds: number,
+  mixedRounds: number,
+): { maleAvg: number; femaleAvg: number } {
+  if (maleCount === 0 && femaleCount === 0) return { maleAvg: 0, femaleAvg: 0 };
+
+  // 혼복 라운드 1회당 슬롯 계산
+  const mixedCourts = Math.min(courts, Math.floor(maleCount / 2), Math.floor(femaleCount / 2));
+  const malesInMixed = mixedCourts * 2;
+  const femalesInMixed = mixedCourts * 2;
+  const remCourtsAfterMixed = courts - mixedCourts;
+  const maleCourtsInMixed = Math.min(remCourtsAfterMixed, Math.floor((maleCount - malesInMixed) / 4));
+  const femaleCourtsInMixed = Math.min(
+    remCourtsAfterMixed - maleCourtsInMixed,
+    Math.floor((femaleCount - femalesInMixed) / 4),
+  );
+  const maleSlotsPerMixed = malesInMixed + maleCourtsInMixed * 4;
+  const femaleSlotsPerMixed = femalesInMixed + femaleCourtsInMixed * 4;
+
+  // 비혼복 라운드 1회당 슬롯 계산
+  const maleCourtsPerPure = Math.min(courts, Math.floor(maleCount / 4));
+  const maleSlotsPerPure = maleCourtsPerPure * 4;
+  const femaleCourtsPerPure = Math.min(courts - maleCourtsPerPure, Math.floor(femaleCount / 4));
+  const femaleSlotsPerPure = femaleCourtsPerPure * 4;
+
+  const pureRounds = totalRounds - mixedRounds;
+  const totalMaleSlots = mixedRounds * maleSlotsPerMixed + pureRounds * maleSlotsPerPure;
+  const totalFemaleSlots = mixedRounds * femaleSlotsPerMixed + pureRounds * femaleSlotsPerPure;
+
+  return {
+    maleAvg: maleCount > 0 ? totalMaleSlots / maleCount : 0,
+    femaleAvg: femaleCount > 0 ? totalFemaleSlots / femaleCount : 0,
+  };
+}
+
+/**
+ * 남녀 경기수 차이가 1 이하가 되는 최소 혼복 라운드 수를 탐색.
+ * 균형을 맞출 수 없으면 totalRounds(최대값) 반환.
+ */
+export function findOptimalMixedRounds(
+  maleCount: number,
+  femaleCount: number,
+  courts: number,
+  totalRounds: number,
+): number {
+  for (let mx = 0; mx <= totalRounds; mx++) {
+    const { maleAvg, femaleAvg } = calculateExpectedGames(maleCount, femaleCount, courts, totalRounds, mx);
+    if (Math.abs(maleAvg - femaleAvg) <= 1) return mx;
+  }
+  return totalRounds; // 완전 균형 불가 시 최대값 반환
+}
+
+/**
  * 조별경기에서 모든 인원이 같은 게임수를 갖는 최적 라운드 수를 계산.
  * maxRounds 이하에서 "인원당 게임수"가 정수가 되는 최대 라운드 반환.
  * 불가능하면(step > maxRounds) maxRounds 그대로 반환 (최대한 같게).

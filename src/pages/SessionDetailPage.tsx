@@ -8,7 +8,7 @@ import {
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS } from '../utils/matchmaking';
+import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
@@ -56,6 +56,10 @@ export default function SessionDetailPage() {
   const [generateMode, setGenerateMode] = useState<'rounds' | 'games'>('rounds');
   const [generateTargetGames, setGenerateTargetGames] = useState(4);
   const [showSimpleView, setShowSimpleView] = useState(false);
+
+  // Mixed rounds balance suggestion
+  const [showMixedSuggestion, setShowMixedSuggestion] = useState(false);
+  const [suggestedMixedRounds, setSuggestedMixedRounds] = useState(0);
 
   // Monday schedule modal
   const [showMondayModal, setShowMondayModal] = useState(false);
@@ -230,8 +234,10 @@ export default function SessionDetailPage() {
     setShowGenerateModal(true);
   };
 
-  const handleGenerate = async () => {
+  // 실제 대진표 생성 실행 (mixedRoundsToUse: 최종 결정된 혼복 라운드 수)
+  const doGenerate = async (mixedRoundsToUse: number) => {
     setShowGenerateModal(false);
+    setShowMixedSuggestion(false);
     const pastMatches = await getAllMatches(session.clubId);
     const latePlayerIds = session.trackLate
       ? new Set(attendance.filter(a => a.attending && a.isLate === true).map(a => a.playerId))
@@ -241,7 +247,7 @@ export default function SessionDetailPage() {
       players: attendingPlayers,
       courts: generateCourts,
       totalRounds: generateRounds,
-      mixedRounds: session.type === 'weekly' ? generateMixedRounds : 0,
+      mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
       sessionType: session.type,
       pastMatches,
       latePlayerIds,
@@ -251,10 +257,35 @@ export default function SessionDetailPage() {
       isGenerated: true,
       courts: generateCourts,
       rounds: generateRounds,
-      mixedRounds: session.type === 'weekly' ? generateMixedRounds : 0,
+      mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
     });
     load();
     setTab('bracket');
+  };
+
+  const handleGenerate = async () => {
+    // 주간(weekly) 일반 경기에서 남녀 경기수 균형 체크
+    if (session.type === 'weekly' && session.gameMode !== 'group') {
+      const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
+      const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
+
+      if (maleCount > 0 && femaleCount > 0) {
+        const { maleAvg, femaleAvg } = calculateExpectedGames(
+          maleCount, femaleCount, generateCourts, generateRounds, generateMixedRounds,
+        );
+
+        if (Math.abs(maleAvg - femaleAvg) > 1) {
+          const optimal = findOptimalMixedRounds(maleCount, femaleCount, generateCourts, generateRounds);
+          if (optimal !== generateMixedRounds) {
+            setSuggestedMixedRounds(optimal);
+            setShowMixedSuggestion(true);
+            return; // 사용자 응답 대기
+          }
+        }
+      }
+    }
+
+    await doGenerate(generateMixedRounds);
   };
 
   const handleScoreUpdate = async (matchId: string, score1: string, score2: string) => {
@@ -1560,6 +1591,63 @@ export default function SessionDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Mixed Rounds Balance Suggestion Dialog */}
+      {showMixedSuggestion && (() => {
+        const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
+        const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
+        const { maleAvg: curMaleAvg, femaleAvg: curFemaleAvg } = calculateExpectedGames(
+          maleCount, femaleCount, generateCourts, generateRounds, generateMixedRounds,
+        );
+        const { maleAvg: newMaleAvg, femaleAvg: newFemaleAvg } = calculateExpectedGames(
+          maleCount, femaleCount, generateCourts, generateRounds, suggestedMixedRounds,
+        );
+        return (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+              <div className="px-6 pt-5 pb-4">
+                <h2 className="font-bold text-slate-800 text-lg mb-1">남녀 경기수 불균형 감지</h2>
+                <p className="text-sm text-slate-500">
+                  현재 설정으로는 남녀 경기수 차이가 1개를 초과합니다.
+                  혼복 라운드를 늘려서 균형을 맞출까요?
+                </p>
+                <div className="mt-4 space-y-2">
+                  <div className="bg-red-50 rounded-xl p-3">
+                    <p className="text-xs font-semibold text-red-700 mb-1">현재 설정 (혼복 {generateMixedRounds}R)</p>
+                    <div className="flex gap-4 text-xs text-red-600">
+                      <span>남자 ≈ {curMaleAvg.toFixed(1)}경기</span>
+                      <span>여자 ≈ {curFemaleAvg.toFixed(1)}경기</span>
+                      <span className="font-semibold">차이 {Math.abs(curMaleAvg - curFemaleAvg).toFixed(1)}</span>
+                    </div>
+                  </div>
+                  <div className="bg-green-50 rounded-xl p-3">
+                    <p className="text-xs font-semibold text-green-700 mb-1">변경 후 (혼복 {suggestedMixedRounds}R)</p>
+                    <div className="flex gap-4 text-xs text-green-600">
+                      <span>남자 ≈ {newMaleAvg.toFixed(1)}경기</span>
+                      <span>여자 ≈ {newFemaleAvg.toFixed(1)}경기</span>
+                      <span className="font-semibold">차이 {Math.abs(newMaleAvg - newFemaleAvg).toFixed(1)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 pb-5 flex gap-3">
+                <button
+                  onClick={() => doGenerate(generateMixedRounds)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  아니오 (현재 설정 유지)
+                </button>
+                <button
+                  onClick={() => doGenerate(suggestedMixedRounds)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+                >
+                  예 (혼복 {suggestedMixedRounds}R)
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Groups Tab */}
       {tab === 'groups' && session.gameMode === 'group' && isAdminUser && (
