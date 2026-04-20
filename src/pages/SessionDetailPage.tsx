@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
+import type { PairingStrategy } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup, MatchType } from '../types';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
@@ -46,6 +47,7 @@ export default function SessionDetailPage() {
   const [dragOverEmptyRound, setDragOverEmptyRound] = useState<number | null>(null);
   const [deletedMatchIds, setDeletedMatchIds] = useState<Set<string>>(new Set());
   const [dragPlayerSource, setDragPlayerSource] = useState<{matchId: string, team: 'team1'|'team2', slot: 'player1'|'player2'} | null>(null);
+  const [benchDragPlayer, setBenchDragPlayer] = useState<Player | null>(null);
 
   // Generate settings modal
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -55,6 +57,7 @@ export default function SessionDetailPage() {
   const [generateTargetGroup, setGenerateTargetGroup] = useState<string | 'all'>('all');
   const [generateMode, setGenerateMode] = useState<'rounds' | 'games'>('rounds');
   const [generateTargetGames, setGenerateTargetGames] = useState(4);
+  const [generateStrategy, setGenerateStrategy] = useState<PairingStrategy>('no-repeat-pair');
   const [showSimpleView, setShowSimpleView] = useState(false);
 
   // Mixed rounds balance suggestion
@@ -254,6 +257,7 @@ export default function SessionDetailPage() {
     setGenerateRounds(session.rounds);
     setGenerateMixedRounds(session.mixedRounds);
     setGenerateTargetGroup('all');
+    setGenerateStrategy('no-repeat-pair');
     setShowGenerateModal(true);
   };
 
@@ -277,6 +281,7 @@ export default function SessionDetailPage() {
       sessionType: session.type,
       pastMatches,
       latePlayerIds,
+      strategy: generateStrategy,
     });
     await saveMatches(session.id, generated);
     await updateSession(session.id, {
@@ -547,6 +552,20 @@ export default function SessionDetailPage() {
   };
 
   const handlePlayerDrop = (targetMatchId: string, targetTeam: 'team1'|'team2', targetSlot: 'player1'|'player2') => {
+    // 후보(벤치) 선수를 코트 슬롯으로 드롭: 해당 선수로 교체
+    if (benchDragPlayer) {
+      const newPending = pendingMatches.map(m => ({
+        ...m,
+        team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
+        team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
+      }));
+      const tgtMatch = newPending.find(m => m.id === targetMatchId);
+      if (!tgtMatch) { setBenchDragPlayer(null); return; }
+      tgtMatch[targetTeam][targetSlot] = benchDragPlayer;
+      setPendingMatches(newPending);
+      setBenchDragPlayer(null);
+      return;
+    }
     if (!dragPlayerSource) return;
     const { matchId: srcMatchId, team: srcTeam, slot: srcSlot } = dragPlayerSource;
     if (srcMatchId === targetMatchId && srcTeam === targetTeam && srcSlot === targetSlot) {
@@ -566,6 +585,11 @@ export default function SessionDetailPage() {
     srcMatch[srcTeam][srcSlot] = tgtPlayer;
     tgtMatch[targetTeam][targetSlot] = srcPlayer;
     setPendingMatches(newPending);
+    setDragPlayerSource(null);
+  };
+
+  const handleBenchDragStart = (player: Player) => {
+    setBenchDragPlayer(player);
     setDragPlayerSource(null);
   };
 
@@ -739,11 +763,25 @@ export default function SessionDetailPage() {
       rounds: manualRounds,
       courts: manualCourts,
     });
+
+    // 저장 직후 새로운 매치를 불러와서 바로 편집 모드로 진입
+    const newMatches = await getMatches(session!.id);
+    setMatches(newMatches);
+    setSession(prev => prev ? { ...prev, isGenerated: true, rounds: manualRounds, courts: manualCourts } : prev);
+
     setShowManualMode(false);
     setManualSlots({});
     setManualStep('setup');
-    load();
     setTab('bracket');
+
+    // 자동 편집 모드 진입 (편집 버튼 없이 바로 드래그앤드랍 가능)
+    const copied: Match[] = JSON.parse(JSON.stringify(newMatches));
+    setPendingMatches(copied);
+    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : manualRounds;
+    setPendingRoundsCount(Math.max(manualRounds, maxRound));
+    setSubstituteTarget(null);
+    setDeletedMatchIds(new Set());
+    setEditMode(true);
   };
 
   // --- Team Setup ---
@@ -769,23 +807,6 @@ export default function SessionDetailPage() {
       { team1: [valid[0], valid[2]] as Player[], team2: [valid[1], valid[3]] as Player[] },
       { team1: [valid[0], valid[3]] as Player[], team2: [valid[1], valid[2]] as Player[] },
     ];
-  };
-
-  const openTeamSetup = (sourceMatches: Match[]) => {
-    const items = sourceMatches
-      .filter(m => !m.isCompleted)
-      .filter(m => m.team1?.player1 && m.team1?.player2 && m.team2?.player1 && m.team2?.player2)
-      .sort((a, b) => a.round - b.round || a.court - b.court)
-      .map(m => ({
-        matchId: m.id,
-        round: m.round,
-        court: m.court,
-        matchType: m.matchType,
-        players: [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2],
-        rotation: 0,
-      }));
-    setTeamSetupItems(items);
-    setShowTeamSetup(true);
   };
 
   const handleTeamSetupSave = async () => {
@@ -830,6 +851,7 @@ export default function SessionDetailPage() {
         players: groupPlayers,
         courts: generateCourts,
         totalRounds,
+        strategy: generateStrategy,
       });
 
       // 해당 그룹의 기존 매치 삭제
@@ -870,11 +892,37 @@ export default function SessionDetailPage() {
               {session.title && (
                 <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
               )}
-              <span className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-xs font-medium ${
-                session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-              }`}>
-                {session.type === 'quarterly' ? '🏆 분기대회' : '주간 경기'}
-              </span>
+              {isAdminUser ? (
+                <select
+                  value={session.type}
+                  onChange={async (e) => {
+                    const newType = e.target.value as 'weekly' | 'quarterly';
+                    await updateSession(session.id, {
+                      type: newType,
+                      mixedRounds: newType === 'quarterly' ? 0 : session.mixedRounds,
+                    });
+                    setSession(prev => prev ? {
+                      ...prev,
+                      type: newType,
+                      mixedRounds: newType === 'quarterly' ? 0 : prev.mixedRounds,
+                    } : prev);
+                  }}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-xs font-medium border-0 cursor-pointer appearance-none ${
+                    session.type === 'quarterly'
+                      ? 'bg-yellow-100 text-yellow-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}
+                >
+                  <option value="weekly">주간 경기</option>
+                  <option value="quarterly">🏆 분기대회</option>
+                </select>
+              ) : (
+                <span className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-xs font-medium ${
+                  session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                }`}>
+                  {session.type === 'quarterly' ? '🏆 분기대회' : '주간 경기'}
+                </span>
+              )}
             </div>
             <p className="text-slate-500 text-sm">
               {session.courts}개 코트 · {session.rounds}라운드
@@ -1585,6 +1633,32 @@ export default function SessionDetailPage() {
                   ))}
                 </div>
               </div>
+              {/* 생성 전략 선택 */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">생성 전략</label>
+                <div className="flex flex-col gap-1.5">
+                  {([
+                    { value: 'no-repeat-pair' as const, label: '동일 페어 제거 우선', desc: '같은 파트너와 경기 안 하도록 최적화' },
+                    { value: 'balanced-rest' as const, label: '연속 경기 제거 우선', desc: '쉰 선수 먼저 투입 (2경기→휴식→2경기 패턴)' },
+                    { value: 'random' as const, label: '랜덤 생성', desc: '최적화 없이 무작위 배치' },
+                  ]).map(s => (
+                    <button
+                      key={s.value}
+                      onClick={() => setGenerateStrategy(s.value)}
+                      className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        generateStrategy === s.value
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span className="font-medium">{s.label}</span>
+                      <span className={`block text-xs mt-0.5 ${generateStrategy === s.value ? 'text-blue-100' : 'text-slate-400'}`}>
+                        {s.desc}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
               {session.gameMode === 'group' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">입력 방식</label>
@@ -2174,14 +2248,6 @@ export default function SessionDetailPage() {
                   {session.isConfirmed ? '재확정' : '확정'}
                 </button>
               )}
-              {user && matches.length > 0 && !editMode && (
-                <button
-                  onClick={() => openTeamSetup(matches)}
-                  className="bg-blue-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-600 transition-colors"
-                >
-                  팀 배정
-                </button>
-              )}
               {isAdminUser && !editMode && (
                 <button
                   onClick={() => {
@@ -2197,7 +2263,7 @@ export default function SessionDetailPage() {
                   수기 입력
                 </button>
               )}
-              {isSuperAdmin && !editMode && (
+              {isSuperAdmin && !editMode && !currentClub?.name?.includes('일요일') && (
                 <button
                   onClick={handleMondayClick}
                   className="bg-indigo-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-indigo-700 transition-colors"
@@ -2338,6 +2404,7 @@ export default function SessionDetailPage() {
                 onDeleteRound={handleDeleteRound}
                 onPlayerDragStart={editMode ? handlePlayerDragStart : undefined}
                 onPlayerDrop={editMode ? handlePlayerDrop : undefined}
+                onBenchDragStart={editMode ? handleBenchDragStart : undefined}
               />
             ));
           })()}

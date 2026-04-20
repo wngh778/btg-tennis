@@ -7,6 +7,9 @@ interface PairingHistory {
 
 type PlayerHistory = Map<string, PairingHistory>;
 
+// 대진표 생성 전략
+export type PairingStrategy = 'no-repeat-pair' | 'balanced-rest' | 'random';
+
 function buildHistory(pastMatches: Match[]): PlayerHistory {
   const history: PlayerHistory = new Map();
 
@@ -124,9 +127,22 @@ function generateSameGenderRound(
   history: PlayerHistory,
   courts: number,
   matchType: MatchType,
+  strategy: PairingStrategy = 'no-repeat-pair',
 ): { matches: Array<{ team1: Team; team2: Team; matchType: MatchType }>; resting: Player[] } {
   const playing = players.slice(0, courts * 4);
   const resting = players.slice(courts * 4);
+
+  // 랜덤 전략: 1번만 시도, 점수 계산 없음
+  if (strategy === 'random') {
+    const shuffled = shuffle(playing);
+    const matches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
+    for (let c = 0; c < courts; c++) {
+      const [p1, p2, p3, p4] = shuffled.slice(c * 4, c * 4 + 4);
+      matches.push({ team1: { player1: p1, player2: p2 }, team2: { player1: p3, player2: p4 }, matchType });
+    }
+    updateHistory(history, matches);
+    return { matches, resting };
+  }
 
   let bestScore = Infinity;
   let bestMatches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
@@ -160,11 +176,28 @@ function generateMixedRound(
   females: Player[],
   history: PlayerHistory,
   courts: number,
+  strategy: PairingStrategy = 'no-repeat-pair',
 ): { matches: Array<{ team1: Team; team2: Team; matchType: MatchType }>; restingMales: Player[]; restingFemales: Player[] } {
   const malesPlaying = males.slice(0, courts * 2);
   const femalesPlaying = females.slice(0, courts * 2);
   const restingMales = males.slice(courts * 2);
   const restingFemales = females.slice(courts * 2);
+
+  // 랜덤 전략: 1번만 시도, 점수 계산 없음
+  if (strategy === 'random') {
+    const shuffledM = shuffle(malesPlaying);
+    const shuffledF = shuffle(femalesPlaying);
+    const matches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
+    for (let c = 0; c < courts; c++) {
+      const m1 = shuffledM[c * 2];
+      const m2 = shuffledM[c * 2 + 1];
+      const f1 = shuffledF[c * 2];
+      const f2 = shuffledF[c * 2 + 1];
+      matches.push({ team1: { player1: m1, player2: f1 }, team2: { player1: m2, player2: f2 }, matchType: 'mixed' });
+    }
+    updateHistory(history, matches);
+    return { matches, restingMales, restingFemales };
+  }
 
   let bestScore = Infinity;
   let bestMatches: Array<{ team1: Team; team2: Team; matchType: MatchType }> = [];
@@ -207,11 +240,12 @@ export interface GenerateOptions {
   sessionType: 'weekly' | 'quarterly';
   pastMatches: Match[];
   latePlayerIds?: Set<string>; // 지각자 ID 집합 - 1라운드 제외
+  strategy?: PairingStrategy; // 기본값: 'no-repeat-pair'
 }
 
 export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const { sessionId, courts, totalRounds, mixedRounds, mixedLast = false, sessionType, pastMatches } = options;
-  const { players, latePlayerIds = new Set<string>() } = options;
+  const { players, latePlayerIds = new Set<string>(), strategy = 'no-repeat-pair' } = options;
 
   const history = buildHistory(pastMatches);
   const allMatches: Omit<Match, 'id'>[] = [];
@@ -223,13 +257,27 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const gameCounts = new Map<string, number>();
   players.forEach(p => gameCounts.set(p.id, 0));
 
+  // 연속경기 제거 전략용: 이전 라운드에 경기한 선수 ID 추적
+  let lastRoundPlayedSet = new Set<string>();
+
   // 게임 횟수 적은 순 정렬 (동점이면 랜덤), 1라운드는 지각자 후순위
   const byLeastGames = (arr: Player[], round: number): Player[] =>
     [...arr].sort((a, b) => {
+      // 1라운드 지각자 후순위 (전략 무관)
       if (round === 1 && latePlayerIds.size > 0) {
         const aLate = latePlayerIds.has(a.id) ? 1 : 0;
         const bLate = latePlayerIds.has(b.id) ? 1 : 0;
         if (aLate !== bLate) return aLate - bLate;
+      }
+      // 연속경기 제거 우선: 이전 라운드에 쉰 선수 우선 배정
+      if (strategy === 'balanced-rest' && round > 1) {
+        const aRested = !lastRoundPlayedSet.has(a.id) ? 0 : 1;
+        const bRested = !lastRoundPlayedSet.has(b.id) ? 0 : 1;
+        if (aRested !== bRested) return aRested - bRested;
+      }
+      // 랜덤 전략: 순수 랜덤 정렬
+      if (strategy === 'random') {
+        return Math.random() - 0.5;
       }
       const d = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
       return d !== 0 ? d : Math.random() - 0.5;
@@ -241,6 +289,12 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   for (let round = 1; round <= totalRounds; round++) {
     const roundMatches: Array<{ team1: Team; team2: Team; matchType: MatchType; court: number }> = [];
     let courtNum = 1;
+    // 이번 라운드에 경기한 선수 추적 (연속경기 제거 전략용)
+    const currentRoundPlayedIds = new Set<string>();
+    const addGamesAndTrack = (ps: Player[]) => {
+      addGames(ps);
+      ps.forEach(p => currentRoundPlayedIds.add(p.id));
+    };
 
     if (sessionType === 'quarterly') {
       const matchType: MatchType = round % 2 === 1 ? 'male' : 'female';
@@ -248,9 +302,9 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
       const activeCourts = Math.min(courts, Math.floor(pool.length / 4));
       if (activeCourts > 0) {
         const playing = pool.slice(0, activeCourts * 4);
-        const { matches } = generateSameGenderRound(playing, history, activeCourts, matchType);
+        const { matches } = generateSameGenderRound(playing, history, activeCourts, matchType, strategy);
         matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-        addGames(playing);
+        addGamesAndTrack(playing);
       }
     } else {
       // mixedLast=true면 뒤쪽 N라운드가 혼복, 앞쪽이 남복/여복
@@ -271,9 +325,9 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
           const mixedF = sf.slice(0, mixedCourts * 2);
           mixedM.forEach(p => mixedMaleIds.add(p.id));
           mixedF.forEach(p => mixedFemaleIds.add(p.id));
-          const { matches: mx } = generateMixedRound(mixedM, mixedF, history, mixedCourts);
+          const { matches: mx } = generateMixedRound(mixedM, mixedF, history, mixedCourts, strategy);
           mx.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-          addGames([...mixedM, ...mixedF]);
+          addGamesAndTrack([...mixedM, ...mixedF]);
         }
 
         // 남은 남자 → 남복 (남은 코트 수 제한)
@@ -281,9 +335,9 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         const maleCourts = Math.min(courts - mixedCourts, Math.floor(remMales.length / 4));
         if (maleCourts > 0) {
           const playing = remMales.slice(0, maleCourts * 4);
-          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male');
+          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male', strategy);
           matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-          addGames(playing);
+          addGamesAndTrack(playing);
         }
 
         // 남은 여자 → 여복 (남은 코트 수 제한)
@@ -291,9 +345,9 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         const femaleCourts = Math.min(courts - mixedCourts - maleCourts, Math.floor(remFemales.length / 4));
         if (femaleCourts > 0) {
           const playing = remFemales.slice(0, femaleCourts * 4);
-          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female');
+          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female', strategy);
           matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-          addGames(playing);
+          addGamesAndTrack(playing);
         }
       } else {
         // 비혼복 라운드: 남복 + 여복 동시 진행
@@ -301,21 +355,24 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
         const maleCourts = Math.min(courts, Math.floor(sm.length / 4));
         if (maleCourts > 0) {
           const playing = sm.slice(0, maleCourts * 4);
-          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male');
+          const { matches } = generateSameGenderRound(playing, history, maleCourts, 'male', strategy);
           matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-          addGames(playing);
+          addGamesAndTrack(playing);
         }
 
         const sf = byLeastGames(females, round);
         const femaleCourts = Math.min(courts - (courtNum - 1), Math.floor(sf.length / 4));
         if (femaleCourts > 0) {
           const playing = sf.slice(0, femaleCourts * 4);
-          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female');
+          const { matches } = generateSameGenderRound(playing, history, femaleCourts, 'female', strategy);
           matches.forEach(m => roundMatches.push({ ...m, court: courtNum++ }));
-          addGames(playing);
+          addGamesAndTrack(playing);
         }
       }
     }
+
+    // 다음 라운드를 위해 이번 라운드 경기자 기록
+    lastRoundPlayedSet = currentRoundPlayedIds;
 
     for (const m of roundMatches) {
       allMatches.push({
@@ -461,10 +518,11 @@ export interface GroupGenerateOptions {
   players: Player[];
   courts: number;
   totalRounds: number;
+  strategy?: PairingStrategy; // 기본값: 'no-repeat-pair'
 }
 
 export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match, 'id'>[] {
-  const { sessionId, groupId, players, courts, totalRounds } = options;
+  const { sessionId, groupId, players, courts, totalRounds, strategy = 'no-repeat-pair' } = options;
   if (players.length < 4) return [];
 
   // 1) 최적 라운드 수 자동 계산 (균등 게임수 보장)
@@ -475,14 +533,27 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
   const gameCounts = new Map<string, number>();
   players.forEach(p => gameCounts.set(p.id, 0));
 
+  // 연속경기 제거 전략용: 이전 라운드에 경기한 선수 ID 추적
+  let lastRoundPlayedSet = new Set<string>();
+
   const allMatches: Omit<Match, 'id'>[] = [];
 
   for (let round = 1; round <= actualRounds; round++) {
     const activeCourts = Math.min(courts, Math.floor(players.length / 4));
     if (activeCourts === 0) continue;
 
-    // 게임수 적은 순 → 이번 라운드 출전자 선정
+    // 전략에 따라 출전 선수 정렬
     const sorted = [...players].sort((a, b) => {
+      // 연속경기 제거 우선: 이전 라운드에 쉰 선수 우선 배정
+      if (strategy === 'balanced-rest' && round > 1) {
+        const aRested = !lastRoundPlayedSet.has(a.id) ? 0 : 1;
+        const bRested = !lastRoundPlayedSet.has(b.id) ? 0 : 1;
+        if (aRested !== bRested) return aRested - bRested;
+      }
+      // 랜덤 전략: 순수 랜덤 정렬
+      if (strategy === 'random') {
+        return Math.random() - 0.5;
+      }
       const diff = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
       return diff !== 0 ? diff : Math.random() - 0.5;
     });
@@ -491,8 +562,9 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
     let bestScore = Infinity;
     let bestMatches: Array<{ team1: Team; team2: Team }> = [];
 
-    // 2) 충분한 시도로 중복 페어 최소화
-    for (let attempt = 0; attempt < 500; attempt++) {
+    // 2) 충분한 시도로 중복 페어 최소화 (랜덤 전략은 1번만)
+    const attempts = strategy === 'random' ? 1 : 500;
+    for (let attempt = 0; attempt < attempts; attempt++) {
       const shuffled = shuffle(playing);
       const roundMatches: Array<{ team1: Team; team2: Team }> = [];
       let totalScore = 0;
@@ -500,7 +572,7 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
         const [p1, p2, p3, p4] = shuffled.slice(c * 4, c * 4 + 4);
         const t1: Team = { player1: p1, player2: p2 };
         const t2: Team = { player1: p3, player2: p4 };
-        totalScore += groupMatchScore(history, t1, t2);
+        totalScore += strategy === 'random' ? 0 : groupMatchScore(history, t1, t2);
         roundMatches.push({ team1: t1, team2: t2 });
       }
       if (totalScore < bestScore) {
@@ -512,7 +584,12 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
     }
 
     updateHistory(history, bestMatches);
-    playing.forEach(p => gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1));
+    playing.forEach(p => {
+      gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1);
+    });
+
+    // 다음 라운드를 위해 이번 라운드 경기자 기록
+    lastRoundPlayedSet = new Set(playing.map(p => p.id));
 
     bestMatches.forEach((m, i) => {
       const allPlayers = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2];
