@@ -258,7 +258,8 @@ export function RoundCard({
   dragMatchId, dragOverMatchId, onDragStart, onDragOver, onDrop,
   dragOverEmptyRound, onDragOverEmptyRound, onDropIntoRound,
   matchGameNumbers, onAutoFillRound, onDeleteMatch, onDeleteRound,
-  onPlayerDragStart, onPlayerDrop,
+  onPlayerDragStart, onPlayerDrop, onBenchDragStart,
+  dragRound, dragOverRound, onRoundDragStart, onRoundDragOver, onRoundDrop,
 }: {
   round: number;
   matches: Match[];
@@ -284,6 +285,13 @@ export function RoundCard({
   onDeleteRound?: (round: number) => void;
   onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
   onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+  onBenchDragStart?: (player: Player) => void;
+  // 라운드 순서 변경용 드래그
+  dragRound?: number | null;
+  dragOverRound?: number | null;
+  onRoundDragStart?: (round: number) => void;
+  onRoundDragOver?: (round: number | null) => void;
+  onRoundDrop?: (round: number) => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -292,10 +300,48 @@ export function RoundCard({
   const restingPlayers = attendingPlayers.filter(p => !playingIds.has(p.id));
   const isEmptyRound = editMode && displayMatches.length === 0;
 
+  const isThisRoundDragging = editMode && dragRound === round;
+  const isThisRoundDragOver = editMode && dragOverRound === round && dragRound !== round;
+
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-        <h2 className="font-semibold text-slate-700">{round}라운드</h2>
+    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all ${
+      isThisRoundDragOver ? 'border-blue-400 ring-2 ring-blue-300' : 'border-slate-200'
+    } ${isThisRoundDragging ? 'opacity-50' : ''}`}>
+      <div
+        className={`px-5 py-3 border-b border-slate-100 flex items-center justify-between ${
+          editMode && onRoundDragStart
+            ? 'bg-slate-50 cursor-grab active:cursor-grabbing select-none'
+            : 'bg-slate-50'
+        } ${isThisRoundDragOver ? 'bg-blue-50' : ''}`}
+        draggable={editMode && !!onRoundDragStart}
+        onDragStart={editMode && onRoundDragStart ? (e) => {
+          e.stopPropagation();
+          onRoundDragStart(round);
+        } : undefined}
+        onDragOver={editMode && onRoundDragOver ? (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRoundDragOver(round);
+        } : undefined}
+        onDragLeave={editMode && onRoundDragOver ? (e) => {
+          e.stopPropagation();
+          onRoundDragOver(null);
+        } : undefined}
+        onDrop={editMode && onRoundDrop ? (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRoundDrop(round);
+        } : undefined}
+      >
+        <div className="flex items-center gap-2">
+          {editMode && onRoundDragStart && (
+            <span className="text-slate-400 text-sm select-none">⠿⠿</span>
+          )}
+          <h2 className="font-semibold text-slate-700">{round}라운드</h2>
+          {isThisRoundDragOver && (
+            <span className="text-xs text-blue-500 font-medium">여기로 이동</span>
+          )}
+        </div>
         {editMode && onDeleteRound && (
           <button
             onClick={() => onDeleteRound(round)}
@@ -352,13 +398,31 @@ export function RoundCard({
       )}
       {restingPlayers.length > 0 && (
         <div className="px-5 py-2.5 bg-amber-50 border-t border-amber-100 flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-amber-600 shrink-0">휴식</span>
+          <span className="text-xs font-semibold text-amber-600 shrink-0">
+            {editMode ? '후보' : '휴식'}
+          </span>
           {restingPlayers.map(p => (
-            <span key={p.id} className="flex items-center gap-1 text-xs text-amber-700">
-              <span className={`w-1.5 h-1.5 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-              {p.name}
-            </span>
+            editMode ? (
+              <button
+                key={p.id}
+                draggable={true}
+                onDragStart={e => { e.stopPropagation(); onBenchDragStart?.(p); }}
+                onDragEnd={() => {/* drag end는 부모가 처리 */}}
+                className="flex items-center gap-1 text-xs text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-full px-2 py-0.5 cursor-grab active:cursor-grabbing transition-colors"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                {p.name}
+              </button>
+            ) : (
+              <span key={p.id} className="flex items-center gap-1 text-xs text-amber-700">
+                <span className={`w-1.5 h-1.5 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                {p.name}
+              </span>
+            )
           ))}
+          {editMode && (
+            <span className="text-xs text-amber-500 ml-1">← 코트 선수에게 드래그</span>
+          )}
         </div>
       )}
     </div>

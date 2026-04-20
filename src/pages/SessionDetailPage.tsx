@@ -48,6 +48,9 @@ export default function SessionDetailPage() {
   const [deletedMatchIds, setDeletedMatchIds] = useState<Set<string>>(new Set());
   const [dragPlayerSource, setDragPlayerSource] = useState<{matchId: string, team: 'team1'|'team2', slot: 'player1'|'player2'} | null>(null);
   const [benchDragPlayer, setBenchDragPlayer] = useState<Player | null>(null);
+  // 라운드 드래그 (라운드 순서 변경용)
+  const [dragRound, setDragRound] = useState<number | null>(null);
+  const [dragOverRound, setDragOverRound] = useState<number | null>(null);
 
   // Generate settings modal
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -267,7 +270,9 @@ export default function SessionDetailPage() {
   const doGenerate = async (mixedRoundsToUse: number, mixedLast = false) => {
     setShowGenerateModal(false);
     setShowMixedSuggestion(false);
-    const pastMatches = await getAllMatches(session.clubId);
+    // 현재 세션 경기 제외 (재생성 시 기존 결과가 패널티에 포함되는 버그 방지)
+    const allClubMatches = await getAllMatches(session.clubId);
+    const pastMatches = allClubMatches.filter(m => m.sessionId !== session.id);
     const latePlayerIds = session.trackLate
       ? new Set(attendance.filter(a => a.attending && a.isLate === true).map(a => a.playerId))
       : new Set<string>();
@@ -547,6 +552,22 @@ export default function SessionDetailPage() {
     setDragOverMatchId(null);
   };
 
+  // 라운드 헤더 드래그: 두 라운드의 모든 경기 round 번호를 교체
+  const handleRoundDrop = (targetRound: number) => {
+    if (!dragRound || dragRound === targetRound) {
+      setDragRound(null);
+      setDragOverRound(null);
+      return;
+    }
+    setPendingMatches(prev => prev.map(m => {
+      if (m.round === dragRound) return { ...m, round: targetRound };
+      if (m.round === targetRound) return { ...m, round: dragRound };
+      return m;
+    }));
+    setDragRound(null);
+    setDragOverRound(null);
+  };
+
   const handlePlayerDragStart = (matchId: string, team: 'team1'|'team2', slot: 'player1'|'player2') => {
     setDragPlayerSource({ matchId, team, slot });
   };
@@ -611,26 +632,15 @@ export default function SessionDetailPage() {
 
   const handleSubstitute = (replacementPlayer: Player) => {
     if (!substituteTarget) return;
+    // 해당 경기의 해당 슬롯만 교체 — 다른 라운드/경기에는 영향 없음
     const newPending = pendingMatches.map(m => {
+      if (m.id !== substituteTarget.matchId) return m;
       const updated = {
         ...m,
         team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
         team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
       };
-      // Replace target slot with replacementPlayer
-      if (m.id === substituteTarget.matchId) {
-        updated[substituteTarget.team][substituteTarget.slot] = replacementPlayer;
-      }
-      // If replacementPlayer was in another slot, replace it with the target player
-      for (const team of ['team1', 'team2'] as const) {
-        for (const slot of ['player1', 'player2'] as const) {
-          if (!(m.id === substituteTarget.matchId && team === substituteTarget.team && slot === substituteTarget.slot)) {
-            if (updated[team][slot].id === replacementPlayer.id) {
-              updated[team][slot] = substituteTarget.player;
-            }
-          }
-        }
-      }
+      updated[substituteTarget.team][substituteTarget.slot] = replacementPlayer;
       return updated;
     });
     setPendingMatches(newPending);
@@ -2405,6 +2415,11 @@ export default function SessionDetailPage() {
                 onPlayerDragStart={editMode ? handlePlayerDragStart : undefined}
                 onPlayerDrop={editMode ? handlePlayerDrop : undefined}
                 onBenchDragStart={editMode ? handleBenchDragStart : undefined}
+                dragRound={dragRound}
+                dragOverRound={dragOverRound}
+                onRoundDragStart={editMode ? setDragRound : undefined}
+                onRoundDragOver={editMode ? setDragOverRound : undefined}
+                onRoundDrop={editMode ? handleRoundDrop : undefined}
               />
             ));
           })()}
