@@ -10,15 +10,15 @@ type PlayerHistory = Map<string, PairingHistory>;
 // 대진표 생성 전략
 export type PairingStrategy = 'no-repeat-pair' | 'balanced-rest' | 'random';
 
+function ensurePlayer(history: PlayerHistory, id: string): PairingHistory {
+  if (!history.has(id)) {
+    history.set(id, { partnerCount: new Map(), opponentCount: new Map() });
+  }
+  return history.get(id)!;
+}
+
 function buildHistory(pastMatches: Match[]): PlayerHistory {
   const history: PlayerHistory = new Map();
-
-  const ensurePlayer = (id: string) => {
-    if (!history.has(id)) {
-      history.set(id, { partnerCount: new Map(), opponentCount: new Map() });
-    }
-    return history.get(id)!;
-  };
 
   for (const match of pastMatches) {
     const players = [
@@ -29,15 +29,15 @@ function buildHistory(pastMatches: Match[]): PlayerHistory {
     ];
 
     const addPartner = (p1: Player, p2: Player) => {
-      const h1 = ensurePlayer(p1.id);
-      const h2 = ensurePlayer(p2.id);
+      const h1 = ensurePlayer(history, p1.id);
+      const h2 = ensurePlayer(history, p2.id);
       h1.partnerCount.set(p2.id, (h1.partnerCount.get(p2.id) || 0) + 1);
       h2.partnerCount.set(p1.id, (h2.partnerCount.get(p1.id) || 0) + 1);
     };
 
     const addOpponent = (p1: Player, p2: Player) => {
-      const h1 = ensurePlayer(p1.id);
-      const h2 = ensurePlayer(p2.id);
+      const h1 = ensurePlayer(history, p1.id);
+      const h2 = ensurePlayer(history, p2.id);
       h1.opponentCount.set(p2.id, (h1.opponentCount.get(p2.id) || 0) + 1);
       h2.opponentCount.set(p1.id, (h2.opponentCount.get(p1.id) || 0) + 1);
     };
@@ -51,7 +51,7 @@ function buildHistory(pastMatches: Match[]): PlayerHistory {
       }
     }
 
-    players.forEach(p => ensurePlayer(p.id));
+    players.forEach(p => ensurePlayer(history, p.id));
   }
 
   return history;
@@ -101,10 +101,8 @@ function shuffle<T>(arr: T[]): T[] {
 function updateHistory(history: PlayerHistory, matches: Array<{ team1: Team; team2: Team }>) {
   for (const m of matches) {
     const update = (p1: Player, p2: Player, type: 'partner' | 'opponent') => {
-      if (!history.has(p1.id)) history.set(p1.id, { partnerCount: new Map(), opponentCount: new Map() });
-      if (!history.has(p2.id)) history.set(p2.id, { partnerCount: new Map(), opponentCount: new Map() });
-      const h1 = history.get(p1.id)!;
-      const h2 = history.get(p2.id)!;
+      const h1 = ensurePlayer(history, p1.id);
+      const h2 = ensurePlayer(history, p2.id);
       if (type === 'partner') {
         h1.partnerCount.set(p2.id, (h1.partnerCount.get(p2.id) || 0) + 1);
         h2.partnerCount.set(p1.id, (h2.partnerCount.get(p1.id) || 0) + 1);
@@ -385,6 +383,142 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   }
 
   return allMatches;
+}
+
+// ─── 대회연습모드: 고정 페어가 항상 같은 팀으로 출전 ───────────────────────────
+// fixedPairIds 의 두 선수는 매 라운드 동일 팀.
+// 나머지 선수들은 균등 게임 수, 연속 경기 최소화, 반복 상대/파트너 최소화.
+export function generateFixedPairMatches({
+  sessionId,
+  players,
+  fixedPairIds,
+  courts,
+  totalRounds,
+}: {
+  sessionId: string;
+  players: Player[];
+  fixedPairIds: [string, string];
+  courts: number;
+  totalRounds: number;
+}): Omit<Match, 'id'>[] {
+  const pA = players.find(p => p.id === fixedPairIds[0]);
+  const pB = players.find(p => p.id === fixedPairIds[1]);
+  if (!pA || !pB) return [];
+
+  const others = players.filter(p => p.id !== fixedPairIds[0] && p.id !== fixedPairIds[1]);
+  if (others.length < 2) return [];
+
+  // 게임 횟수 추적
+  const gameCounts = new Map<string, number>(players.map(p => [p.id, 0]));
+  // 마지막 플레이 라운드 (연속 경기 패널티용)
+  const lastRound = new Map<string, number>(players.map(p => [p.id, 0]));
+  // 페어 카운트 (파트너 + 상대 모두)
+  const pairCount = new Map<string, number>();
+  const pairKey = (a: Player, b: Player) => [a.id, b.id].sort().join('|');
+  const getPairCount = (a: Player, b: Player) => pairCount.get(pairKey(a, b)) ?? 0;
+  const incPairCount = (a: Player, b: Player) => {
+    const k = pairKey(a, b);
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  };
+  // 고정 페어를 상대한 횟수
+  const vsFixedCount = new Map<string, number>(others.map(p => [p.id, 0]));
+
+  const getMatchType = (t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player): MatchType => {
+    const males = [t1p1, t1p2, t2p1, t2p2].filter(p => p.gender === 'male').length;
+    return males === 4 ? 'male' : males === 0 ? 'female' : 'mixed';
+  };
+
+  const mkMatch = (
+    round: number, court: number,
+    t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player,
+  ): Omit<Match, 'id'> => ({
+    sessionId, round, court,
+    matchType: getMatchType(t1p1, t1p2, t2p1, t2p2),
+    team1: { player1: t1p1, player2: t1p2 },
+    team2: { player1: t2p1, player2: t2p2 },
+    isCompleted: false,
+  });
+
+  const results: Omit<Match, 'id'>[] = [];
+
+  for (let round = 1; round <= totalRounds; round++) {
+    // ─ 1단계: 고정 페어의 상대 2명 선택 ─────────────────────────────────────
+    const consScore = (p: Player) => lastRound.get(p.id) === round - 1 ? 5 : 0;
+
+    let bestOppPair: [Player, Player] | null = null;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < others.length; i++) {
+      for (let j = i + 1; j < others.length; j++) {
+        const ci = others[i], cj = others[j];
+        const score =
+          (vsFixedCount.get(ci.id) ?? 0) * 200 +   // 고정 페어 상대 횟수 (최우선 패널티)
+          (vsFixedCount.get(cj.id) ?? 0) * 200 +
+          getPairCount(ci, cj) * 100 +              // 같은 팀 반복 패널티
+          (gameCounts.get(ci.id) ?? 0) * 10 +       // 게임 수 균등
+          (gameCounts.get(cj.id) ?? 0) * 10 +
+          consScore(ci) + consScore(cj);             // 연속 경기 패널티
+        if (score < bestScore) { bestScore = score; bestOppPair = [ci, cj]; }
+      }
+    }
+
+    if (!bestOppPair) break;
+    const [opp1, opp2] = bestOppPair;
+
+    // 기록 갱신
+    vsFixedCount.set(opp1.id, (vsFixedCount.get(opp1.id) ?? 0) + 1);
+    vsFixedCount.set(opp2.id, (vsFixedCount.get(opp2.id) ?? 0) + 1);
+    [pA, pB, opp1, opp2].forEach(p => {
+      gameCounts.set(p.id, (gameCounts.get(p.id) ?? 0) + 1);
+      lastRound.set(p.id, round);
+    });
+    incPairCount(pA, pB);
+    incPairCount(opp1, opp2);
+    results.push(mkMatch(round, 1, pA, pB, opp1, opp2));
+
+    // ─ 2단계: 나머지 코트 채우기 ─────────────────────────────────────────────
+    const usedIds = new Set([pA.id, pB.id, opp1.id, opp2.id]);
+    const available = others.filter(p => !usedIds.has(p.id));
+
+    // 게임 수 적은 순 + 연속 경기 패널티 순으로 정렬
+    const priority = (p: Player) =>
+      (gameCounts.get(p.id) ?? 0) * 10 + (lastRound.get(p.id) === round - 1 ? 5 : 0);
+    const sorted = [...available].sort((a, b) => priority(a) - priority(b));
+
+    const extraCourts = courts - 1;
+    const activePlayers = sorted.slice(0, extraCourts * 4);
+
+    for (let c = 0; c < extraCourts; c++) {
+      const group = activePlayers.slice(c * 4, (c + 1) * 4);
+      if (group.length < 4) continue;
+
+      // 4명의 3가지 페어링 중 반복 최소 조합 선택
+      const configs: [[Player, Player], [Player, Player]][] = [
+        [[group[0], group[1]], [group[2], group[3]]],
+        [[group[0], group[2]], [group[1], group[3]]],
+        [[group[0], group[3]], [group[1], group[2]]],
+      ];
+      let bestCfg = configs[0];
+      let bestCfgScore = Infinity;
+      for (const [[p1, p2], [p3, p4]] of configs) {
+        const s = getPairCount(p1, p2) * 100 + getPairCount(p3, p4) * 100
+                + getPairCount(p1, p3) * 10 + getPairCount(p1, p4) * 10
+                + getPairCount(p2, p3) * 10 + getPairCount(p2, p4) * 10;
+        if (s < bestCfgScore) { bestCfgScore = s; bestCfg = [[p1, p2], [p3, p4]]; }
+      }
+
+      const [[t1p1, t1p2], [t2p1, t2p2]] = bestCfg;
+      [t1p1, t1p2, t2p1, t2p2].forEach(p => {
+        gameCounts.set(p.id, (gameCounts.get(p.id) ?? 0) + 1);
+        lastRound.set(p.id, round);
+      });
+      incPairCount(t1p1, t1p2);
+      incPairCount(t2p1, t2p2);
+      results.push(mkMatch(round, c + 2, t1p1, t1p2, t2p1, t2p2));
+    }
+  }
+
+  return results;
 }
 
 const DAY_MAP: Record<string, number> = {

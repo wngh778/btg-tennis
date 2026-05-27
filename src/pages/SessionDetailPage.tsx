@@ -2,19 +2,20 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
-  setAttendance, deleteAttendance, addGuest, deleteGuest, updateGuest,
-  getMatches, saveMatches, insertMatch, deleteMatch, updateMatchScore, updateSession, getAllMatches, updateMatch, confirmSession,
-  getSessionGroups, unconfirmSession,
+  setAttendance,
+  getMatches, updateMatchScore, updateSession, updateMatch, confirmSession,
+  getSessionGroups, deleteMatch, unconfirmSession,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
-import { generateMatches, generateGroupMatches, calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames, findOptimalMixedRounds } from '../utils/matchmaking';
-import type { PairingStrategy } from '../utils/matchmaking';
+import { calcOptimalGroupRounds, isVotingOpen, NTRP_OPTIONS, calculateExpectedGames } from '../utils/matchmaking';
 import type { Session, Member, Guest, AttendanceRecord, Match, Player, Gender, SessionGroup, MatchType } from '../types';
+import { useBracketEdit } from '../hooks/useBracketEdit';
+import { useGenerateModal } from '../hooks/useGenerateModal';
+import { useGuestForm } from '../hooks/useGuestForm';
 import { formatDate } from '../utils/formatting';
 import { LoadingState, ErrorState } from '../components/ui/PageState';
 import { RoundCard } from '../components/session/RoundCard';
-import type { SubstituteTarget } from '../components/session/RoundCard';
 import { PlayerDetailTab } from '../components/session/PlayerDetailTab';
 import { SessionResultTab } from '../components/session/SessionResultTab';
 import { GroupResultTab } from '../components/session/GroupResultTab';
@@ -25,6 +26,7 @@ export default function SessionDetailPage() {
   const { user, appUser, isAdminUser, isSuperAdmin, loading: authLoading } = useAuth();
   const { currentClub } = useClub();
 
+  // ── 핵심 데이터 상태 ──────────────────────────────────────────────────────────
   const [session, setSession] = useState<Session | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -32,72 +34,16 @@ export default function SessionDetailPage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'vote' | 'groups' | 'bracket' | 'detail' | 'result'>('vote');
+  const [tab, setTab] = useState<'vote' | 'groups' | 'bracket' | 'detail' | 'result'>(() => {
+    if (!id) return 'vote';
+    const saved = sessionStorage.getItem(`sdp_tab_${id}`);
+    const VALID: string[] = ['vote', 'groups', 'bracket', 'detail', 'result'];
+    return (VALID.includes(saved ?? '') ? saved : 'vote') as 'vote' | 'groups' | 'bracket' | 'detail' | 'result';
+  });
   const [groups, setGroups] = useState<SessionGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
-  // Bracket editing
-  const [editMode, setEditMode] = useState(false);
-  const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
-  const [pendingRoundsCount, setPendingRoundsCount] = useState(0);
-  const [substituteTarget, setSubstituteTarget] = useState<SubstituteTarget>(null);
-  const [saving, setSaving] = useState(false);
-  const [dragMatchId, setDragMatchId] = useState<string | null>(null);
-  const [dragOverMatchId, setDragOverMatchId] = useState<string | null>(null);
-  const [dragOverEmptyRound, setDragOverEmptyRound] = useState<number | null>(null);
-  const [deletedMatchIds, setDeletedMatchIds] = useState<Set<string>>(new Set());
-  const [dragPlayerSource, setDragPlayerSource] = useState<{matchId: string, team: 'team1'|'team2', slot: 'player1'|'player2'} | null>(null);
-  const [benchDragPlayer, setBenchDragPlayer] = useState<Player | null>(null);
-  // 라운드 드래그 (라운드 순서 변경용)
-  const [dragRound, setDragRound] = useState<number | null>(null);
-  const [dragOverRound, setDragOverRound] = useState<number | null>(null);
-
-  // Generate settings modal
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [generateCourts, setGenerateCourts] = useState(4);
-  const [generateRounds, setGenerateRounds] = useState(6);
-  const [generateMixedRounds, setGenerateMixedRounds] = useState(2);
-  const [generateTargetGroup, setGenerateTargetGroup] = useState<string | 'all'>('all');
-  const [generateMode, setGenerateMode] = useState<'rounds' | 'games'>('rounds');
-  const [generateTargetGames, setGenerateTargetGames] = useState(4);
-  const [generateStrategy, setGenerateStrategy] = useState<PairingStrategy>('no-repeat-pair');
-  const [showSimpleView, setShowSimpleView] = useState(false);
-
-  // Mixed rounds balance suggestion
-  const [showMixedSuggestion, setShowMixedSuggestion] = useState(false);
-  const [suggestedMixedRounds, setSuggestedMixedRounds] = useState(0);
-
-  // Monday schedule modal
-  const [showMondayModal, setShowMondayModal] = useState(false);
-  const [mondayR1Selection, setMondayR1Selection] = useState<string[]>([]);
-  const [mondayCompanion, setMondayCompanion] = useState('');
-  const [mondayRounds, setMondayRounds] = useState(5);
-
-  // Guest form
-  const [showGuestForm, setShowGuestForm] = useState(false);
-  const [guestName, setGuestName] = useState('');
-  const [guestGender, setGuestGender] = useState<Gender>('male');
-  const [guestNtrp, setGuestNtrp] = useState(3.0);
-
-  // Guest edit
-  const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
-  const [editGuestName, setEditGuestName] = useState('');
-  const [editGuestGender, setEditGuestGender] = useState<Gender>('male');
-  const [editGuestNtrp, setEditGuestNtrp] = useState(3.0);
-
-  // 조건 추천 메시지
-  const [aiRecommendMsg, setAiRecommendMsg] = useState<string | null>(null);
-
-  // Manual bracket builder modal
-  const [showManualMode, setShowManualMode] = useState(false);
-  const [manualStep, setManualStep] = useState<'setup' | 'assign'>('setup');
-  const [manualRounds, setManualRounds] = useState(5);
-  const [manualCourts, setManualCourts] = useState(3);
-  const [manualActiveRound, setManualActiveRound] = useState(1);
-  // key: `${round}_${court}`, value: Player 배열 (최대 4명)
-  const [manualSlots, setManualSlots] = useState<Record<string, Player[]>>({});
-
-  // Team setup modal
+  // Team setup modal (소규모 — 페이지에 유지)
   const [showTeamSetup, setShowTeamSetup] = useState(false);
   const [teamSetupItems, setTeamSetupItems] = useState<{
     matchId: string;
@@ -108,6 +54,19 @@ export default function SessionDetailPage() {
     rotation: number;
   }[]>([]);
 
+  // ── 훅 호출 전 파생 값 ─────────────────────────────────────────────────────
+  // (hooks에 attendingPlayers를 전달해야 하므로 early return 앞에서 계산)
+  const attendingPlayers: Player[] = attendance
+    .filter(a => a.attending)
+    .map(a => ({ id: a.playerId, name: a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType }));
+
+  // 탭 변경 + sessionStorage 저장 (탭 전환 후 복귀 시 복원용)
+  const changeTab = (t: 'vote' | 'groups' | 'bracket' | 'detail' | 'result') => {
+    if (id) sessionStorage.setItem(`sdp_tab_${id}`, t);
+    setTab(t);
+  };
+
+  // 데이터 로드 함수 — 훅에 전달하므로 훅 호출 전에 정의 (React Rules: hooks before early returns)
   const load = useCallback(async () => {
     if (!id) return;
     try {
@@ -143,6 +102,83 @@ export default function SessionDetailPage() {
     }
   }, [groups, session?.gameMode]);
 
+  // ── 커스텀 훅 (React Rules of Hooks: early return 앞에 위치) ───────────────
+  // 브라켓 편집: editMode, drag, pendingMatches 등 13개 상태 + 핸들러
+  const bracketEdit = useBracketEdit({ matches, session, attendingPlayers, load });
+
+  // 게스트 폼: showGuestForm, guestName 등 8개 상태 + 핸들러
+  const guestForm = useGuestForm({ session, matches, isAdminUser, load });
+
+  // 대진표 생성 모달: showGenerateModal 등 27개 상태 + 핸들러
+  const generateModal = useGenerateModal({
+    session,
+    attendingPlayers,
+    attendance,
+    matches,
+    groups,
+    load,
+    changeTab,
+    startEditWithMatches: bracketEdit.startEditWithMatches,
+    setMatches,
+    setSession,
+  });
+
+  // 훅 반환값 구조분해 (JSX에서 직접 사용)
+  const {
+    editMode, pendingMatches, pendingRoundsCount, substituteTarget, saving,
+    dragMatchId, dragOverMatchId, dragOverEmptyRound,
+    dragRound, dragOverRound,
+    setDragMatchId, setDragOverMatchId, setDragOverEmptyRound, setDragRound, setDragOverRound,
+    setSubstituteTarget,
+    handleEditModeStart, handleEditCancel, handleRoundCountChange, handleEditSave,
+    handleAutoFillRound, handleDeleteMatch, handleDeleteRound,
+    handleDragDrop, handleDragToEmptyRound, handleRoundDrop,
+    handlePlayerDragStart, handlePlayerDrop, handleBenchDragStart,
+    handlePlayerClick, handleSubstitute,
+  } = bracketEdit;
+
+  const {
+    showGuestForm, guestName, guestGender, guestNtrp,
+    editingGuestId, editGuestName, editGuestGender, editGuestNtrp,
+    setShowGuestForm, setGuestName, setGuestGender, setGuestNtrp,
+    setEditingGuestId, setEditGuestName, setEditGuestGender, setEditGuestNtrp,
+    handleAddGuest, handleRemoveGuest, handleStartEditGuest, handleSaveEditGuest,
+  } = guestForm;
+
+  const {
+    showModeModal, setShowModeModal,
+    showGenerateModal, setShowGenerateModal,
+    generateCourts, setGenerateCourts,
+    generateRounds, setGenerateRounds,
+    generateMixedRounds, setGenerateMixedRounds,
+    generateTargetGroup, setGenerateTargetGroup,
+    generateMode, setGenerateMode,
+    generateTargetGames, setGenerateTargetGames,
+    generateStrategy, setGenerateStrategy,
+    aiRecommendMsg,
+    showMixedSuggestion,
+    suggestedMixedRounds,
+    showSimpleView, setShowSimpleView,
+    showMondayModal, setShowMondayModal,
+    mondayBasePlayer, setMondayBasePlayer,
+    mondayR1Selection, setMondayR1Selection,
+    mondayCompanion, setMondayCompanion,
+    mondayRounds, setMondayRounds,
+    showFixedPairModal, setShowFixedPairModal,
+    fixedPairSelection, setFixedPairSelection,
+    fixedPairCourts, setFixedPairCourts,
+    fixedPairRounds, setFixedPairRounds,
+    showManualMode, setShowManualMode,
+    manualStep, setManualStep,
+    manualRounds, setManualRounds,
+    manualCourts, setManualCourts,
+    manualActiveRound, setManualActiveRound,
+    manualSlots, setManualSlots,
+    handleGenerateClick, doGenerate, handleGenerate, handleGenerateGroupMatches,
+    handleAiRecommend, handleMondayClick, handleMondayGenerate,
+    handleFixedPairGenerate, handleManualTogglePlayer, handleManualSave,
+  } = generateModal;
+
   if (loading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
   if (!session) return <div className="text-center py-16 text-slate-500">경기를 찾을 수 없습니다.</div>;
@@ -150,9 +186,6 @@ export default function SessionDetailPage() {
   const votingOpen = isVotingOpen(session.votingDeadline);
   const canVote = votingOpen || isAdminUser;
   const attendingIds = new Set(attendance.filter(a => a.attending).map(a => a.playerId));
-  const attendingPlayers: Player[] = attendance
-    .filter(a => a.attending)
-    .map(a => ({ id: a.playerId, name: a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType }));
 
   // --- Voting ---
   const handleMemberVote = async (member: Member, attending: boolean) => {
@@ -187,141 +220,21 @@ export default function SessionDetailPage() {
     load();
   };
 
-  const handleAddGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const guestId = await addGuest({ name: guestName, gender: guestGender, ntrp: guestNtrp, sessionId: session.id });
+  const handleGuestLate = async (guest: Guest, isLate: boolean) => {
+    if (!isAdminUser) return;
+    const rec = attendance.find(a => a.playerId === guest.id);
+    if (!rec || !rec.attending) return;
     await setAttendance({
       sessionId: session.id,
-      playerId: guestId,
+      playerId: guest.id,
       playerType: 'guest',
-      playerName: guestName,
-      gender: guestGender,
-      ntrp: guestNtrp,
+      playerName: guest.name,
+      gender: guest.gender,
+      ntrp: guest.ntrp,
       attending: true,
+      isLate,
     }, isAdminUser);
-    setGuestName(''); setGuestGender('male'); setGuestNtrp(3.0);
-    setShowGuestForm(false);
     load();
-  };
-
-  const handleRemoveGuest = async (guest: Guest) => {
-    await deleteGuest(guest.id);
-    await deleteAttendance(session.id, guest.id, isAdminUser);
-    load();
-  };
-
-  const handleStartEditGuest = (guest: Guest) => {
-    setEditingGuestId(guest.id);
-    setEditGuestName(guest.name);
-    setEditGuestGender(guest.gender);
-    setEditGuestNtrp(guest.ntrp);
-  };
-
-  const handleSaveEditGuest = async () => {
-    if (!editingGuestId) return;
-    const oldGuest = guests.find(g => g.id === editingGuestId);
-    // 게스트 테이블 업데이트
-    await updateGuest(editingGuestId, { name: editGuestName, gender: editGuestGender, ntrp: editGuestNtrp });
-    // attendance 업데이트 (이름, 성별, NTRP 동기화)
-    await setAttendance({
-      sessionId: session.id,
-      playerId: editingGuestId,
-      playerType: 'guest',
-      playerName: editGuestName,
-      gender: editGuestGender,
-      ntrp: editGuestNtrp,
-      attending: true,
-    }, isAdminUser);
-    // 대진표에 해당 게스트가 포함되어 있으면 match 내 player 정보도 업데이트
-    if (oldGuest) {
-      for (const m of matches) {
-        let changed = false;
-        const updated = { team1: { ...m.team1 }, team2: { ...m.team2 } };
-        for (const team of ['team1', 'team2'] as const) {
-          for (const slot of ['player1', 'player2'] as const) {
-            if (m[team][slot].id === editingGuestId) {
-              updated[team][slot] = { ...m[team][slot], name: editGuestName, gender: editGuestGender, ntrp: editGuestNtrp };
-              changed = true;
-            }
-          }
-        }
-        if (changed) {
-          await updateMatch(m.id, { team1: updated.team1, team2: updated.team2 });
-        }
-      }
-    }
-    setEditingGuestId(null);
-    load();
-  };
-
-  // --- Bracket Generation ---
-  const handleGenerateClick = () => {
-    setGenerateCourts(session.courts);
-    setGenerateRounds(session.rounds);
-    setGenerateMixedRounds(session.mixedRounds);
-    setGenerateTargetGroup('all');
-    setGenerateStrategy('no-repeat-pair');
-    setShowGenerateModal(true);
-  };
-
-  // 실제 대진표 생성 실행
-  // mixedRoundsToUse: 최종 결정된 혼복 라운드 수
-  // mixedLast: true면 남복/여복 먼저, 혼복 나중 배치 (제안 수락 시 사용)
-  const doGenerate = async (mixedRoundsToUse: number, mixedLast = false) => {
-    setShowGenerateModal(false);
-    setShowMixedSuggestion(false);
-    // 현재 세션 경기 제외 (재생성 시 기존 결과가 패널티에 포함되는 버그 방지)
-    const allClubMatches = await getAllMatches(session.clubId);
-    const pastMatches = allClubMatches.filter(m => m.sessionId !== session.id);
-    const latePlayerIds = session.trackLate
-      ? new Set(attendance.filter(a => a.attending && a.isLate === true).map(a => a.playerId))
-      : new Set<string>();
-    const generated = generateMatches({
-      sessionId: session.id,
-      players: attendingPlayers,
-      courts: generateCourts,
-      totalRounds: generateRounds,
-      mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
-      mixedLast,
-      sessionType: session.type,
-      pastMatches,
-      latePlayerIds,
-      strategy: generateStrategy,
-    });
-    await saveMatches(session.id, generated);
-    await updateSession(session.id, {
-      isGenerated: true,
-      courts: generateCourts,
-      rounds: generateRounds,
-      mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
-    });
-    load();
-    setTab('bracket');
-  };
-
-  const handleGenerate = async () => {
-    // 주간(weekly) 일반 경기에서 남녀 경기수 균형 체크
-    if (session.type === 'weekly' && session.gameMode !== 'group') {
-      const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
-      const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
-
-      if (maleCount > 0 && femaleCount > 0) {
-        const { maleAvg, femaleAvg } = calculateExpectedGames(
-          maleCount, femaleCount, generateCourts, generateRounds, generateMixedRounds,
-        );
-
-        if (Math.abs(maleAvg - femaleAvg) > 1) {
-          const optimal = findOptimalMixedRounds(maleCount, femaleCount, generateCourts, generateRounds);
-          if (optimal !== generateMixedRounds) {
-            setSuggestedMixedRounds(optimal);
-            setShowMixedSuggestion(true);
-            return; // 사용자 응답 대기
-          }
-        }
-      }
-    }
-
-    await doGenerate(generateMixedRounds);
   };
 
   const handleScoreUpdate = async (matchId: string, score1: string, score2: string) => {
@@ -333,319 +246,13 @@ export default function SessionDetailPage() {
     if (!confirm('대진표를 확정하시겠습니까? 확정 후에는 스코어를 수정할 수 없습니다.')) return;
     await confirmSession(session!.id);
     load();
-    setTab('result');
+    changeTab('result');
   };
 
-  // --- Bracket Editing ---
-  const handleEditModeStart = () => {
-    const copied: Match[] = JSON.parse(JSON.stringify(matches));
-    setPendingMatches(copied);
-    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : session.rounds;
-    setPendingRoundsCount(Math.max(session.rounds, maxRound));
-    setSubstituteTarget(null);
-    setDeletedMatchIds(new Set());
-    setEditMode(true);
-  };
+  // --- Bracket Editing handlers → useBracketEdit hook ---
 
-  const handleEditCancel = () => {
-    setEditMode(false);
-    setPendingMatches([]);
-    setPendingRoundsCount(0);
-    setSubstituteTarget(null);
-    setDeletedMatchIds(new Set());
-  };
 
-  const handleRoundCountChange = (delta: number) => {
-    const newCount = pendingRoundsCount + delta;
-    if (newCount < 1) return;
-    if (delta < 0) {
-      setPendingMatches(prev => prev.filter(m => m.round <= newCount));
-    }
-    setPendingRoundsCount(newCount);
-  };
 
-  const handleEditSave = async () => {
-    setSaving(true);
-    try {
-      for (const pm of pendingMatches) {
-        if (pm.id.startsWith('temp_')) continue;
-        const original = matches.find(m => m.id === pm.id);
-        if (!original) continue;
-        const changed =
-          JSON.stringify(original.team1) !== JSON.stringify(pm.team1) ||
-          JSON.stringify(original.team2) !== JSON.stringify(pm.team2) ||
-          original.round !== pm.round ||
-          original.court !== pm.court;
-        if (changed) {
-          await updateMatch(pm.id, { team1: pm.team1, team2: pm.team2, round: pm.round, court: pm.court });
-        }
-      }
-      for (const nm of pendingMatches.filter(m => m.id.startsWith('temp_'))) {
-        const { id: _id, ...matchData } = nm;
-        await insertMatch(matchData);
-      }
-      for (const id of deletedMatchIds) {
-        await deleteMatch(id);
-      }
-      if (pendingRoundsCount !== session.rounds) {
-        await updateSession(session.id, { rounds: pendingRoundsCount });
-      }
-      setEditMode(false);
-      setPendingMatches([]);
-      setPendingRoundsCount(0);
-      setSubstituteTarget(null);
-      setDeletedMatchIds(new Set());
-      load();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAutoFillRound = (round: number) => {
-    const gameCounts = new Map<string, number>();
-    attendingPlayers.forEach(p => gameCounts.set(p.id, 0));
-    for (const m of pendingMatches) {
-      for (const p of [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]) {
-        gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1);
-      }
-    }
-    const sorted = [...attendingPlayers].sort((a, b) => {
-      const diff = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
-      return diff !== 0 ? diff : b.ntrp - a.ntrp;
-    });
-    const courts = session!.courts;
-    const newMatches: Match[] = [];
-    const usedIds = new Set<string>();
-    for (let c = 1; c <= courts; c++) {
-      const avail = sorted.filter(p => !usedIds.has(p.id));
-      if (avail.length < 4) break;
-      const [p1, p2, p3, p4] = avail;
-      const genders = [p1, p2, p3, p4].map(p => p.gender);
-      const matchType = genders.every(g => g === 'male') ? 'male' as const
-        : genders.every(g => g === 'female') ? 'female' as const
-        : 'mixed' as const;
-      newMatches.push({
-        id: `temp_${Date.now()}_${c}`,
-        sessionId: session!.id,
-        round,
-        court: c,
-        matchType,
-        team1: { player1: p1, player2: p2 },
-        team2: { player1: p3, player2: p4 },
-        isCompleted: false,
-      });
-      [p1, p2, p3, p4].forEach(p => usedIds.add(p.id));
-    }
-    if (newMatches.length === 0) { alert('배정할 인원이 부족합니다.'); return; }
-    setPendingMatches(prev => [...prev, ...newMatches]);
-  };
-
-  const handleDeleteMatch = (matchId: string) => {
-    setPendingMatches(prev => prev.filter(m => m.id !== matchId));
-    if (!matchId.startsWith('temp_')) {
-      setDeletedMatchIds(prev => new Set([...prev, matchId]));
-    }
-  };
-
-  const handleDeleteRound = (round: number) => {
-    const toDelete = pendingMatches.filter(m => m.round === round);
-    toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m =>
-      setDeletedMatchIds(prev => new Set([...prev, m.id]))
-    );
-    // 삭제 후 그 위 라운드들을 한 칸씩 앞으로 당김
-    setPendingMatches(prev =>
-      prev
-        .filter(m => m.round !== round)
-        .map(m => m.round > round ? { ...m, round: m.round - 1 } : m)
-    );
-    setPendingRoundsCount(prev => Math.max(1, prev - 1));
-  };
-
-  const handleDragToEmptyRound = (targetRound: number) => {
-    if (!dragMatchId) return;
-    const newPending = pendingMatches.map(m => ({ ...m }));
-    const match = newPending.find(m => m.id === dragMatchId);
-    if (!match) return;
-    const matchesInTargetRound = newPending.filter(m => m.round === targetRound && m.id !== dragMatchId);
-    match.round = targetRound;
-    match.court = matchesInTargetRound.length + 1;
-    setPendingMatches(newPending);
-    setDragMatchId(null);
-    setDragOverMatchId(null);
-    setDragOverEmptyRound(null);
-  };
-
-  const handleMondayClick = () => {
-    const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
-    if (malePlayers.length !== 6) {
-      alert(`참석 남성이 ${malePlayers.length}명입니다. 이 기능은 정확히 6명일 때 사용할 수 있습니다.`);
-      return;
-    }
-    setMondayR1Selection([]);
-    setMondayCompanion('');
-    setMondayRounds(session.rounds >= 6 ? 6 : 5);
-    setShowMondayModal(true);
-  };
-
-  const handleMondayGenerate = async () => {
-    const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
-    const Y = malePlayers.find(p => p.name === '염주호');
-    if (!Y) { alert('염주호 선수를 찾을 수 없습니다.'); return; }
-    if (mondayR1Selection.length !== 3) { alert('첫 경기 선수를 3명 선택하세요.'); return; }
-    if (!mondayCompanion) { alert('염주호의 파트너를 선택하세요.'); return; }
-
-    const companion = malePlayers.find(p => p.id === mondayCompanion)!;
-    const groupB = mondayR1Selection
-      .filter(id => id !== mondayCompanion)
-      .map(id => malePlayers.find(p => p.id === id)!);
-    const groupC = malePlayers.filter(p => p.id !== Y.id && !mondayR1Selection.includes(p.id));
-
-    const [B1, B2] = groupB;
-    const [C1, C2] = groupC;
-
-    setShowMondayModal(false);
-
-    const mk = (round: number, t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player): Omit<Match, 'id'> => ({
-      sessionId: session!.id,
-      round,
-      court: 1,
-      matchType: 'male' as const,
-      team1: { player1: t1p1, player2: t1p2 },
-      team2: { player1: t2p1, player2: t2p2 },
-      score1: undefined,
-      score2: undefined,
-      isCompleted: false,
-    });
-
-    // 6명 라운드 로빈: 12슬롯에 12개 고유 페어 배치 (중복 페어 없음)
-    // 휴식: R1,R4=C조 / R2,R5=B조 / R3,R6=A조
-    const generated: Omit<Match, 'id'>[] = [
-      mk(1, Y, companion, B1, B2),     // A vs B (휴식: C1,C2)
-      mk(2, Y, C1, companion, C2),     // A+C mix (휴식: B1,B2)
-      mk(3, B1, C1, B2, C2),           // B+C mix (휴식: Y,P)
-      mk(4, Y, B1, companion, B2),     // A+B mix (휴식: C1,C2)
-      mk(5, Y, C2, companion, C1),     // A+C mix alt (휴식: B1,B2)
-    ];
-    if (mondayRounds >= 6) {
-      generated.push(mk(6, B1, C2, B2, C1)); // B+C mix alt (휴식: Y,P)
-    }
-
-    await saveMatches(session!.id, generated);
-    await updateSession(session!.id, { isGenerated: true, courts: 1, rounds: mondayRounds, mixedRounds: 0 });
-    load();
-    setTab('bracket');
-  };
-
-  const handleDragDrop = (targetMatchId: string) => {
-    if (!dragMatchId || dragMatchId === targetMatchId) {
-      setDragMatchId(null);
-      setDragOverMatchId(null);
-      return;
-    }
-    const newPending = pendingMatches.map(m => ({ ...m }));
-    const matchA = newPending.find(m => m.id === dragMatchId)!;
-    const matchB = newPending.find(m => m.id === targetMatchId)!;
-    [matchA.round, matchB.round] = [matchB.round, matchA.round];
-    [matchA.court, matchB.court] = [matchB.court, matchA.court];
-    setPendingMatches(newPending);
-    setDragMatchId(null);
-    setDragOverMatchId(null);
-  };
-
-  // 라운드 헤더 드래그: 두 라운드의 모든 경기 round 번호를 교체
-  const handleRoundDrop = (targetRound: number) => {
-    if (!dragRound || dragRound === targetRound) {
-      setDragRound(null);
-      setDragOverRound(null);
-      return;
-    }
-    setPendingMatches(prev => prev.map(m => {
-      if (m.round === dragRound) return { ...m, round: targetRound };
-      if (m.round === targetRound) return { ...m, round: dragRound };
-      return m;
-    }));
-    setDragRound(null);
-    setDragOverRound(null);
-  };
-
-  const handlePlayerDragStart = (matchId: string, team: 'team1'|'team2', slot: 'player1'|'player2') => {
-    setDragPlayerSource({ matchId, team, slot });
-  };
-
-  const handlePlayerDrop = (targetMatchId: string, targetTeam: 'team1'|'team2', targetSlot: 'player1'|'player2') => {
-    // 후보(벤치) 선수를 코트 슬롯으로 드롭: 해당 선수로 교체
-    if (benchDragPlayer) {
-      const newPending = pendingMatches.map(m => ({
-        ...m,
-        team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
-        team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
-      }));
-      const tgtMatch = newPending.find(m => m.id === targetMatchId);
-      if (!tgtMatch) { setBenchDragPlayer(null); return; }
-      tgtMatch[targetTeam][targetSlot] = benchDragPlayer;
-      setPendingMatches(newPending);
-      setBenchDragPlayer(null);
-      return;
-    }
-    if (!dragPlayerSource) return;
-    const { matchId: srcMatchId, team: srcTeam, slot: srcSlot } = dragPlayerSource;
-    if (srcMatchId === targetMatchId && srcTeam === targetTeam && srcSlot === targetSlot) {
-      setDragPlayerSource(null);
-      return;
-    }
-    const newPending = pendingMatches.map(m => ({
-      ...m,
-      team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
-      team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
-    }));
-    const srcMatch = newPending.find(m => m.id === srcMatchId);
-    const tgtMatch = newPending.find(m => m.id === targetMatchId);
-    if (!srcMatch || !tgtMatch) { setDragPlayerSource(null); return; }
-    const srcPlayer = srcMatch[srcTeam][srcSlot];
-    const tgtPlayer = tgtMatch[targetTeam][targetSlot];
-    srcMatch[srcTeam][srcSlot] = tgtPlayer;
-    tgtMatch[targetTeam][targetSlot] = srcPlayer;
-    setPendingMatches(newPending);
-    setDragPlayerSource(null);
-  };
-
-  const handleBenchDragStart = (player: Player) => {
-    setBenchDragPlayer(player);
-    setDragPlayerSource(null);
-  };
-
-  const handlePlayerClick = (
-    matchId: string,
-    team: 'team1' | 'team2',
-    slot: 'player1' | 'player2',
-    player: Player
-  ) => {
-    const match = pendingMatches.find(m => m.id === matchId);
-    if (!match) return;
-    // 같은 선수 클릭 시 팝업 닫기
-    if (substituteTarget?.matchId === matchId && substituteTarget?.slot === slot && substituteTarget?.team === team) {
-      setSubstituteTarget(null);
-      return;
-    }
-    setSubstituteTarget({ matchId, team, slot, player, round: match.round });
-  };
-
-  const handleSubstitute = (replacementPlayer: Player) => {
-    if (!substituteTarget) return;
-    // 해당 경기의 해당 슬롯만 교체 — 다른 라운드/경기에는 영향 없음
-    const newPending = pendingMatches.map(m => {
-      if (m.id !== substituteTarget.matchId) return m;
-      const updated = {
-        ...m,
-        team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
-        team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
-      };
-      updated[substituteTarget.team][substituteTarget.slot] = replacementPlayer;
-      return updated;
-    });
-    setPendingMatches(newPending);
-    setSubstituteTarget(null);
-  };
 
 
   const activeMembers = members.filter(m => m.isActive);
@@ -690,110 +297,6 @@ export default function SessionDetailPage() {
     load();
   };
 
-  // --- 자동 조건 추천 (앱 내장 알고리즘, 외부 API 불필요) ---
-  const handleAiRecommend = () => {
-    const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
-    const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
-    const total = maleCount + femaleCount;
-    if (total < 4) { alert('참석자가 4명 이상이어야 합니다.'); return; }
-
-    setAiRecommendMsg(null);
-
-    // 코트 수: 전원이 최대한 뛸 수 있도록 (최대 4코트)
-    const courts = Math.max(2, Math.min(4, Math.floor(total / 4)));
-
-    // 라운드 수: 1인당 평균 4~5경기 목표
-    const slotsPerRound = courts * 4;
-    const utilization = slotsPerRound / total; // 한 라운드에 뛰는 비율
-    const targetGames = 5;
-    const rounds = Math.max(4, Math.min(8, Math.round(targetGames / utilization)));
-
-    // 혼복 라운드: 남녀 경기 수 차이 ≤1 되는 최솟값
-    const mixedRounds = findOptimalMixedRounds(maleCount, femaleCount, courts, rounds);
-    const { maleAvg, femaleAvg } = calculateExpectedGames(maleCount, femaleCount, courts, rounds, mixedRounds);
-
-    setGenerateCourts(courts);
-    setGenerateRounds(rounds);
-    setGenerateMixedRounds(mixedRounds);
-    setAiRecommendMsg(
-      `코트 ${courts}개 · 라운드 ${rounds}개 · 혼복 ${mixedRounds}라운드` +
-      ` — 남 평균 ${maleAvg.toFixed(1)}경기 / 여 평균 ${femaleAvg.toFixed(1)}경기`
-    );
-  };
-
-  // --- Manual Bracket Builder ---
-  const handleManualTogglePlayer = (round: number, court: number, player: Player) => {
-    const key = `${round}_${court}`;
-    setManualSlots(prev => {
-      const current = prev[key] ?? [];
-      const exists = current.find(p => p.id === player.id);
-      if (exists) {
-        return { ...prev, [key]: current.filter(p => p.id !== player.id) };
-      }
-      if (current.length >= 4) return prev;
-      return { ...prev, [key]: [...current, player] };
-    });
-  };
-
-  const handleManualSave = async () => {
-    const generated: Omit<Match, 'id'>[] = [];
-    for (let r = 1; r <= manualRounds; r++) {
-      for (let c = 1; c <= manualCourts; c++) {
-        const players = manualSlots[`${r}_${c}`] ?? [];
-        if (players.length !== 4) continue;
-        const maleCnt = players.filter(p => p.gender === 'male').length;
-        const matchType: MatchType = maleCnt === 4 ? 'male' : maleCnt === 0 ? 'female' : 'mixed';
-        let t1p1: Player, t1p2: Player, t2p1: Player, t2p2: Player;
-        if (matchType === 'mixed') {
-          const males = players.filter(p => p.gender === 'male');
-          const females = players.filter(p => p.gender === 'female');
-          t1p1 = males[0]; t1p2 = females[0];
-          t2p1 = males[1]; t2p2 = females[1];
-        } else {
-          [t1p1, t1p2, t2p1, t2p2] = players as [Player, Player, Player, Player];
-        }
-        generated.push({
-          sessionId: session!.id,
-          round: r,
-          court: c,
-          matchType,
-          team1: { player1: t1p1, player2: t1p2 },
-          team2: { player1: t2p1, player2: t2p2 },
-          isCompleted: false,
-        });
-      }
-    }
-    if (generated.length === 0) { alert('배정된 경기가 없습니다.'); return; }
-    if (matches.length > 0) {
-      if (!confirm(`기존 대진표(${matches.length}경기)를 교체하시겠습니까?`)) return;
-    }
-    await saveMatches(session!.id, generated);
-    await updateSession(session!.id, {
-      isGenerated: true,
-      rounds: manualRounds,
-      courts: manualCourts,
-    });
-
-    // 저장 직후 새로운 매치를 불러와서 바로 편집 모드로 진입
-    const newMatches = await getMatches(session!.id);
-    setMatches(newMatches);
-    setSession(prev => prev ? { ...prev, isGenerated: true, rounds: manualRounds, courts: manualCourts } : prev);
-
-    setShowManualMode(false);
-    setManualSlots({});
-    setManualStep('setup');
-    setTab('bracket');
-
-    // 자동 편집 모드 진입 (편집 버튼 없이 바로 드래그앤드랍 가능)
-    const copied: Match[] = JSON.parse(JSON.stringify(newMatches));
-    setPendingMatches(copied);
-    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : manualRounds;
-    setPendingRoundsCount(Math.max(manualRounds, maxRound));
-    setSubstituteTarget(null);
-    setDeletedMatchIds(new Set());
-    setEditMode(true);
-  };
-
   // --- Team Setup ---
   const getTeamRotations = (players: Player[], matchType: MatchType) => {
     const valid = players.filter((p): p is Player => !!p);
@@ -830,51 +333,13 @@ export default function SessionDetailPage() {
     }
     setShowTeamSetup(false);
     load();
-    setTab('bracket');
+    changeTab('bracket');
   };
 
   const loadGroups = async () => {
     if (!id) return;
     const g = await getSessionGroups(id);
     setGroups(g);
-  };
-
-  const handleGenerateGroupMatches = async (groupId: string | 'all') => {
-    setShowGenerateModal(false);
-    const targetGroups = groupId === 'all' ? groups : groups.filter(g => g.id === groupId);
-
-    for (const group of targetGroups) {
-      const groupPlayers = attendingPlayers.filter(p => group.memberIds.includes(p.id));
-      if (groupPlayers.length < 4) continue;
-
-      let totalRounds = generateRounds;
-      if (generateMode === 'games') {
-        const activeCourts = Math.min(generateCourts, Math.floor(groupPlayers.length / 4));
-        const playing = activeCourts * 4;
-        totalRounds = playing > 0 ? Math.round(generateTargetGames * groupPlayers.length / playing) : generateRounds;
-        if (totalRounds < 1) totalRounds = 1;
-      }
-
-      const generated = generateGroupMatches({
-        sessionId: session!.id,
-        groupId: group.id,
-        players: groupPlayers,
-        courts: generateCourts,
-        totalRounds,
-        strategy: generateStrategy,
-      });
-
-      // 해당 그룹의 기존 매치 삭제
-      const existingGroupMatches = matches.filter(m => m.groupId === group.id);
-      for (const m of existingGroupMatches) await deleteMatch(m.id);
-
-      // 새 매치 삽입
-      for (const m of generated) await insertMatch(m);
-    }
-
-    await updateSession(session!.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
-    load();
-    setTab('bracket');
   };
 
   // 선수별 경기 번호 계산 (몇 번째 경기인지)
@@ -962,7 +427,7 @@ export default function SessionDetailPage() {
       {/* Tabs */}
       <div className="flex border-b border-slate-200 bg-white rounded-t-2xl overflow-x-auto">
         <button
-          onClick={() => setTab('vote')}
+          onClick={() => changeTab('vote')}
           className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
             tab === 'vote' ? 'text-green-600 border-b-2 border-green-600 bg-green-50' : 'text-slate-500 hover:text-slate-700'
           }`}
@@ -971,7 +436,7 @@ export default function SessionDetailPage() {
         </button>
         {session.gameMode === 'group' && isAdminUser && (
           <button
-            onClick={() => setTab('groups')}
+            onClick={() => changeTab('groups')}
             className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
               tab === 'groups' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-slate-500 hover:text-slate-700'
             }`}
@@ -980,7 +445,7 @@ export default function SessionDetailPage() {
           </button>
         )}
         <button
-          onClick={() => setTab('bracket')}
+          onClick={() => changeTab('bracket')}
           className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
             tab === 'bracket' ? 'text-green-600 border-b-2 border-green-600 bg-green-50' : 'text-slate-500 hover:text-slate-700'
           }`}
@@ -988,7 +453,7 @@ export default function SessionDetailPage() {
           대진표 {session.isGenerated ? '✓' : ''}
         </button>
         <button
-          onClick={() => setTab('detail')}
+          onClick={() => changeTab('detail')}
           className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
             tab === 'detail' ? 'text-green-600 border-b-2 border-green-600 bg-green-50' : 'text-slate-500 hover:text-slate-700'
           }`}
@@ -997,7 +462,7 @@ export default function SessionDetailPage() {
         </button>
         {session.isConfirmed && (
           <button
-            onClick={() => setTab('result')}
+            onClick={() => changeTab('result')}
             className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
               tab === 'result' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-500 hover:text-slate-700'
             }`}
@@ -1291,22 +756,41 @@ export default function SessionDetailPage() {
                         {isAdminUser && <span className="text-xs font-mono text-slate-400">{g.ntrp.toFixed(1)}</span>}
                         <span className="text-xs text-slate-400">{g.gender === 'male' ? '남' : '여'}</span>
                       </div>
-                      {isAdminUser && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleStartEditGuest(g)}
-                            className="text-amber-500 hover:text-amber-700 text-sm"
-                          >
-                            수정
-                          </button>
-                          <button
-                            onClick={() => handleRemoveGuest(g)}
-                            className="text-red-400 hover:text-red-600 text-sm"
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {/* 게스트 지각 토글 (trackLate 활성화 시 관리자만) */}
+                        {session.trackLate && isAdminUser && (() => {
+                          const rec = attendance.find(a => a.playerId === g.id);
+                          const attending = rec?.attending ?? false;
+                          return attending ? (
+                            <button
+                              onClick={() => handleGuestLate(g, !(rec?.isLate ?? false))}
+                              className={`w-10 py-1 rounded text-xs font-medium text-center transition-colors ${
+                                rec?.isLate
+                                  ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
+                                  : 'bg-green-50 text-green-600 hover:bg-green-100'
+                              }`}
+                            >
+                              {rec?.isLate ? '지각' : '정시'}
+                            </button>
+                          ) : null;
+                        })()}
+                        {isAdminUser && (
+                          <>
+                            <button
+                              onClick={() => handleStartEditGuest(g)}
+                              className="text-amber-500 hover:text-amber-700 text-sm"
+                            >
+                              수정
+                            </button>
+                            <button
+                              onClick={() => handleRemoveGuest(g)}
+                              className="text-red-400 hover:text-red-600 text-sm"
+                            >
+                              삭제
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )
                 ))
@@ -1316,37 +800,231 @@ export default function SessionDetailPage() {
         </div>
       )}
 
+      {/* 대진표 생성 모드 선택 모달 */}
+      {showModeModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-800">대진표 생성 모드 선택</h3>
+              <p className="text-xs text-slate-500 mt-1">원하는 방식을 선택하세요.</p>
+            </div>
+            <div className="p-3 space-y-2">
+              {/* 일반 대진표 */}
+              <button
+                onClick={() => { setShowModeModal(false); handleGenerateClick(); }}
+                className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-green-400 hover:bg-green-50 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🟢</span>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm group-hover:text-green-700">일반 대진표 생성</p>
+                    <p className="text-xs text-slate-400 mt-0.5">NTRP 기반 자동 배정, 혼복 설정 가능</p>
+                  </div>
+                </div>
+              </button>
+
+              {/* 대회연습모드 */}
+              <button
+                onClick={() => {
+                  setShowModeModal(false);
+                  setFixedPairSelection([]);
+                  setFixedPairCourts(session.courts);
+                  setFixedPairRounds(session.rounds);
+                  setShowFixedPairModal(true);
+                }}
+                className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🟣</span>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm group-hover:text-purple-700">대회연습모드</p>
+                    <p className="text-xs text-slate-400 mt-0.5">고정 페어가 항상 같은 팀 — 나머지 균등 배정</p>
+                  </div>
+                </div>
+              </button>
+
+              {/* 월요일 편성 (superadmin + 비일요일 클럽) */}
+              {isSuperAdmin && !currentClub?.name?.includes('일요일') && (
+                <button
+                  onClick={() => { setShowModeModal(false); handleMondayClick(); }}
+                  className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">🔵</span>
+                    <div>
+                      <p className="font-semibold text-slate-800 text-sm group-hover:text-indigo-700">월요일 편성</p>
+                      <p className="text-xs text-slate-400 mt-0.5">6인 고정 패턴 (기준 선수 + 파트너)</p>
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {/* 수기 입력 */}
+              <button
+                onClick={() => {
+                  setShowModeModal(false);
+                  setShowManualMode(true);
+                  setManualStep('setup');
+                  setManualRounds(session.rounds);
+                  setManualCourts(session.courts);
+                  setManualActiveRound(1);
+                  setManualSlots({});
+                }}
+                className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-all group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🟠</span>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm group-hover:text-orange-700">수기 입력</p>
+                    <p className="text-xs text-slate-400 mt-0.5">직접 경기 배치</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowModeModal(false)} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 대회연습모드 모달 */}
+      {showFixedPairModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs overflow-y-auto max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-800">대회연습모드</h3>
+              <p className="text-xs text-slate-500 mt-1">고정 페어 2명을 선택하세요. 두 선수는 항상 같은 팀으로 출전합니다.</p>
+            </div>
+
+            {/* 고정 페어 선수 선택 */}
+            <div className="px-5 pt-4 pb-2">
+              <p className="text-xs font-semibold text-slate-500 mb-2">
+                고정 페어 선택 <span className="text-purple-500">({fixedPairSelection.length}/2 선택)</span>
+              </p>
+              {attendingPlayers.map(p => {
+                const selected = fixedPairSelection.includes(p.id);
+                return (
+                  <label key={p.id}
+                    className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 cursor-pointer hover:bg-slate-50 transition-colors"
+                    style={{ borderColor: selected ? '#7c3aed' : '#e2e8f0', backgroundColor: selected ? '#f5f3ff' : '' }}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => {
+                        setFixedPairSelection(prev =>
+                          prev.includes(p.id)
+                            ? prev.filter(x => x !== p.id)
+                            : prev.length < 2 ? [...prev, p.id] : prev
+                        );
+                      }}
+                      disabled={!selected && fixedPairSelection.length >= 2}
+                      className="accent-purple-600"
+                    />
+                    <span className={`w-2 h-2 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
+                    <span className={`font-medium ${selected ? 'text-purple-800' : 'text-slate-800'}`}>{p.name}</span>
+                    <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* 코트 수 / 라운드 수 */}
+            <div className="px-5 pb-3 pt-2 grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-1.5">코트 수</p>
+                <div className="flex items-center gap-1 border border-slate-300 rounded-lg overflow-hidden">
+                  <button onClick={() => setFixedPairCourts(c => Math.max(1, c - 1))} className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">−</button>
+                  <span className="flex-1 text-center text-sm font-medium text-slate-700">{fixedPairCourts}</span>
+                  <button onClick={() => setFixedPairCourts(c => Math.min(6, c + 1))} className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">+</button>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-1.5">라운드 수</p>
+                <div className="flex items-center gap-1 border border-slate-300 rounded-lg overflow-hidden">
+                  <button onClick={() => setFixedPairRounds(r => Math.max(1, r - 1))} className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">−</button>
+                  <span className="flex-1 text-center text-sm font-medium text-slate-700">{fixedPairRounds}</span>
+                  <button onClick={() => setFixedPairRounds(r => Math.min(20, r + 1))} className="px-2.5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-slate-100 flex gap-2 justify-end">
+              <button onClick={() => setShowFixedPairModal(false)} className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800">취소</button>
+              <button
+                onClick={handleFixedPairGenerate}
+                disabled={fixedPairSelection.length !== 2}
+                className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 font-medium disabled:opacity-40"
+              >
+                편성 생성
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Monday Schedule Modal */}
       {showMondayModal && (() => {
         const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
-        const yomPlayer = malePlayers.find(p => p.name === '염주호');
-        const othersForR1 = malePlayers.filter(p => p.name !== '염주호');
-        const toggleR1 = (id: string) => {
+        const basePlayer = malePlayers.find(p => p.id === mondayBasePlayer);
+        const othersForR1 = malePlayers.filter(p => p.id !== mondayBasePlayer);
+        const toggleR1 = (pid: string) => {
           setMondayR1Selection(prev =>
-            prev.includes(id) ? prev.filter(x => x !== id) : prev.length < 3 ? [...prev, id] : prev
+            prev.includes(pid) ? prev.filter(x => x !== pid) : prev.length < 3 ? [...prev, pid] : prev
           );
-          setMondayCompanion(prev => prev === id ? '' : prev);
+          setMondayCompanion(prev => prev === pid ? '' : prev);
+        };
+        const selectBase = (pid: string) => {
+          // 기준 선수 변경 시 R1 선택 초기화
+          setMondayBasePlayer(pid);
+          setMondayR1Selection([]);
+          setMondayCompanion('');
         };
         return (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs overflow-y-auto max-h-[90vh]">
               <div className="px-5 py-4 border-b border-slate-100">
                 <h3 className="font-semibold text-slate-800">월요일 편성</h3>
-                <p className="text-xs text-slate-500 mt-1">첫 경기 4명 선택 후 염주호 파트너를 지정하세요.</p>
+                <p className="text-xs text-slate-500 mt-1">기준 선수를 선택하고, 첫 경기 추가 선수 3명과 파트너를 지정하세요.</p>
               </div>
 
-              {/* Step 1: R1 선수 선택 */}
+              {/* Step 0: 기준 선수(Y) 선택 */}
               <div className="px-5 pt-4 pb-2">
                 <p className="text-xs font-semibold text-slate-500 mb-2">
-                  1단계 — 첫 경기(R1) 참여 선수 선택 <span className="text-indigo-500">({mondayR1Selection.length}/3 선택)</span>
+                  1단계 — 기준 선수 선택 <span className="text-xs font-normal text-slate-400">(항상 파트너와 함께 출전)</span>
                 </p>
-                {/* 염주호 고정 */}
-                {yomPlayer && (
-                  <div className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 bg-indigo-50 border-indigo-300">
+                {malePlayers.map(p => {
+                  const isBase = p.id === mondayBasePlayer;
+                  return (
+                    <label key={p.id}
+                      className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 cursor-pointer hover:bg-slate-50 transition-colors"
+                      style={{ borderColor: isBase ? '#6366f1' : '#e2e8f0', backgroundColor: isBase ? '#eef2ff' : '' }}>
+                      <input
+                        type="radio"
+                        name="mondayBase"
+                        checked={isBase}
+                        onChange={() => selectBase(p.id)}
+                        className="accent-indigo-600"
+                      />
+                      <span className={`font-medium ${isBase ? 'text-indigo-800' : 'text-slate-800'}`}>{p.name}</span>
+                      {isBase && <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 rounded">기준</span>}
+                      <span className="ml-auto text-xs text-slate-400 font-mono">{p.ntrp.toFixed(1)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Step 1: R1 추가 선수 선택 (기준 선수 제외 5명에서 3명) */}
+              <div className="px-5 pt-2 pb-2">
+                <p className="text-xs font-semibold text-slate-500 mb-2">
+                  2단계 — 첫 경기(R1) 추가 선수 선택 <span className="text-indigo-500">({mondayR1Selection.length}/3 선택)</span>
+                </p>
+                {basePlayer && (
+                  <div className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 bg-indigo-50 border-indigo-200 opacity-50">
                     <input type="checkbox" checked disabled className="accent-indigo-600" />
-                    <span className="font-medium text-indigo-800">{yomPlayer.name}</span>
-                    <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 rounded">고정</span>
-                    <span className="ml-auto text-xs text-slate-400 font-mono">{yomPlayer.ntrp.toFixed(1)}</span>
+                    <span className="font-medium text-indigo-800">{basePlayer.name}</span>
+                    <span className="text-xs text-indigo-500">기준 (자동 포함)</span>
+                    <span className="ml-auto text-xs text-slate-400 font-mono">{basePlayer.ntrp.toFixed(1)}</span>
                   </div>
                 )}
                 {othersForR1.map(p => {
@@ -1373,19 +1051,19 @@ export default function SessionDetailPage() {
               {mondayR1Selection.length === 3 && (
                 <div className="px-5 pb-3 pt-1">
                   <p className="text-xs font-semibold text-slate-500 mb-2">
-                    2단계 — 염주호 파트너 선택 <span className="text-xs font-normal text-slate-400">(함께 R1·R2·R4·R5 출전)</span>
+                    3단계 — 파트너 선택 <span className="text-xs font-normal text-slate-400">(기준 선수와 R1·R2·R4·R5 함께 출전)</span>
                   </p>
-                  {mondayR1Selection.map(id => {
-                    const p = malePlayers.find(mp => mp.id === id)!;
+                  {mondayR1Selection.map(pid => {
+                    const p = malePlayers.find(mp => mp.id === pid)!;
                     return (
-                      <label key={id}
+                      <label key={pid}
                         className="flex items-center gap-3 p-2.5 rounded-xl border mb-1 cursor-pointer hover:bg-slate-50 transition-colors"
-                        style={{ borderColor: mondayCompanion === id ? '#6366f1' : '#e2e8f0', backgroundColor: mondayCompanion === id ? '#eef2ff' : '' }}>
+                        style={{ borderColor: mondayCompanion === pid ? '#6366f1' : '#e2e8f0', backgroundColor: mondayCompanion === pid ? '#eef2ff' : '' }}>
                         <input
                           type="radio"
                           name="mondayCompanion"
-                          checked={mondayCompanion === id}
-                          onChange={() => setMondayCompanion(id)}
+                          checked={mondayCompanion === pid}
+                          onChange={() => setMondayCompanion(pid)}
                           className="accent-indigo-600"
                         />
                         <span className="font-medium text-slate-800">{p.name}</span>
@@ -1396,9 +1074,9 @@ export default function SessionDetailPage() {
                 </div>
               )}
 
-              {/* Step 3: 라운드 수 */}
+              {/* Step 4: 라운드 수 */}
               <div className="px-5 pb-3 pt-1">
-                <p className="text-xs font-semibold text-slate-500 mb-2">3단계 — 라운드 수</p>
+                <p className="text-xs font-semibold text-slate-500 mb-2">4단계 — 라운드 수</p>
                 <div className="flex gap-2">
                   {[5, 6].map(r => (
                     <button
@@ -2260,30 +1938,7 @@ export default function SessionDetailPage() {
               )}
               {isAdminUser && !editMode && (
                 <button
-                  onClick={() => {
-                    setShowManualMode(true);
-                    setManualStep('setup');
-                    setManualRounds(session.rounds);
-                    setManualCourts(session.courts);
-                    setManualActiveRound(1);
-                    setManualSlots({});
-                  }}
-                  className="bg-orange-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-orange-600 transition-colors"
-                >
-                  수기 입력
-                </button>
-              )}
-              {isSuperAdmin && !editMode && !currentClub?.name?.includes('일요일') && (
-                <button
-                  onClick={handleMondayClick}
-                  className="bg-indigo-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-indigo-700 transition-colors"
-                >
-                  월요일 편성
-                </button>
-              )}
-              {isAdminUser && !editMode && (
-                <button
-                  onClick={handleGenerateClick}
+                  onClick={() => setShowModeModal(true)}
                   className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
                 >
                   {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
