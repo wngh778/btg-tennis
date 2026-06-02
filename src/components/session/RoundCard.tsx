@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import type { Player, Match } from '../../types';
+import type { Player, Match, MatchType } from '../../types';
 
 export type SubstituteTarget = {
   matchId: string;
@@ -9,9 +9,24 @@ export type SubstituteTarget = {
   round: number;
 } | null;
 
-const matchTypeLabel = { male: '남복', female: '여복', mixed: '혼복' };
-const matchTypeBg = { male: 'bg-blue-50 border-blue-200', female: 'bg-pink-50 border-pink-200', mixed: 'bg-purple-50 border-purple-200' };
-const matchTypeBadge = { male: 'bg-blue-100 text-blue-700', female: 'bg-pink-100 text-pink-700', mixed: 'bg-purple-100 text-purple-700' };
+const matchTypeLabel: Record<MatchType, string> = { male: '남복', female: '여복', mixed: '혼복' };
+const matchTypeBg: Record<MatchType, string> = {
+  male: 'bg-blue-50 border-blue-200',
+  female: 'bg-pink-50 border-pink-200',
+  mixed: 'bg-purple-50 border-purple-200',
+};
+const matchTypeBadge: Record<MatchType, string> = {
+  male: 'bg-blue-100 text-blue-700',
+  female: 'bg-pink-100 text-pink-700',
+  mixed: 'bg-purple-100 text-purple-700',
+};
+
+/** mixed → male → female → mixed 순환 */
+const cycleMatchType = (t: MatchType): MatchType => {
+  if (t === 'mixed') return 'male';
+  if (t === 'male') return 'female';
+  return 'mixed';
+};
 
 export function PlayerBadge({
   player, editMode, isSelected, onClick, showNtrp, gameNum,
@@ -70,7 +85,7 @@ export function PlayerBadge({
 export function MatchCard({
   match, canEditScore, onScoreUpdate, editMode, substituteTarget, onPlayerClick, showNtrp,
   onDragStart, onDragOver, onDrop, isDragOver, matchGameNumbers, onDeleteMatch,
-  onPlayerDragStart, onPlayerDrop,
+  onPlayerDragStart, onPlayerDrop, onMatchTypeChange,
 }: {
   match: Match;
   canEditScore: boolean;
@@ -87,6 +102,8 @@ export function MatchCard({
   onDeleteMatch?: (matchId: string) => void;
   onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
   onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
+  /** 편집 모드에서 경기 유형 변경 */
+  onMatchTypeChange?: (matchId: string, newType: MatchType) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [score1, setScore1] = useState(match.score1 || '');
@@ -113,9 +130,20 @@ export function MatchCard({
         <div className="flex items-center gap-2">
           {editMode && <span className="text-slate-300 text-sm select-none">⠿</span>}
           <span className="font-semibold text-slate-600 text-sm">{match.round}R {match.court}코트</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${matchTypeBadge[match.matchType]}`}>
-            {matchTypeLabel[match.matchType]}
-          </span>
+          {/* 편집 모드: 클릭으로 유형 순환, 일반 모드: 정적 뱃지 */}
+          {editMode && onMatchTypeChange ? (
+            <button
+              onClick={e => { e.stopPropagation(); onMatchTypeChange(match.id, cycleMatchType(match.matchType)); }}
+              title="클릭하여 경기 유형 변경 (혼복→남복→여복)"
+              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-opacity hover:opacity-70 cursor-pointer ${matchTypeBadge[match.matchType]}`}
+            >
+              {matchTypeLabel[match.matchType]} ↻
+            </button>
+          ) : (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${matchTypeBadge[match.matchType]}`}>
+              {matchTypeLabel[match.matchType]}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {match.isCompleted && <span className="text-xs text-slate-400">✓ 완료</span>}
@@ -260,6 +288,7 @@ export function RoundCard({
   matchGameNumbers, onAutoFillRound, onDeleteMatch, onDeleteRound,
   onPlayerDragStart, onPlayerDrop, onBenchDragStart,
   dragRound, dragOverRound, onRoundDragStart, onRoundDragOver, onRoundDrop,
+  onAddMatch, onMatchTypeChange,
 }: {
   round: number;
   matches: Match[];
@@ -292,6 +321,10 @@ export function RoundCard({
   onRoundDragStart?: (round: number) => void;
   onRoundDragOver?: (round: number | null) => void;
   onRoundDrop?: (round: number) => void;
+  /** 편집 모드에서 경기 추가 */
+  onAddMatch?: (round: number) => void;
+  /** 편집 모드에서 경기 유형 변경 */
+  onMatchTypeChange?: (matchId: string, newType: MatchType) => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -342,14 +375,16 @@ export function RoundCard({
             <span className="text-xs text-blue-500 font-medium">여기로 이동</span>
           )}
         </div>
-        {editMode && onDeleteRound && (
-          <button
-            onClick={() => onDeleteRound(round)}
-            className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
-          >
-            라운드 삭제
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {editMode && onDeleteRound && (
+            <button
+              onClick={() => onDeleteRound(round)}
+              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+            >
+              라운드 삭제
+            </button>
+          )}
+        </div>
       </div>
       {isEmptyRound ? (
         <div
@@ -359,14 +394,24 @@ export function RoundCard({
           onDrop={e => { e.preventDefault(); onDropIntoRound?.(round); onDragOverEmptyRound?.(null); }}
         >
           <p className="text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
-          {onAutoFillRound && (
-            <button
-              onClick={() => onAutoFillRound(round)}
-              className="px-4 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium"
-            >
-              자동 배정
-            </button>
-          )}
+          <div className="flex justify-center gap-2">
+            {onAutoFillRound && (
+              <button
+                onClick={() => onAutoFillRound(round)}
+                className="px-4 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium"
+              >
+                자동 배정
+              </button>
+            )}
+            {onAddMatch && (
+              <button
+                onClick={() => onAddMatch(round)}
+                className="px-4 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 font-medium"
+              >
+                + 경기 추가
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div
@@ -392,8 +437,20 @@ export function RoundCard({
               onDeleteMatch={onDeleteMatch}
               onPlayerDragStart={onPlayerDragStart}
               onPlayerDrop={onPlayerDrop}
+              onMatchTypeChange={onMatchTypeChange}
             />
           ))}
+          {/* 편집 모드에서 경기 있는 라운드에도 경기 추가 버튼 */}
+          {editMode && onAddMatch && (
+            <div className="px-5 py-3 flex justify-center">
+              <button
+                onClick={() => onAddMatch(round)}
+                className="px-4 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-300 text-xs rounded-lg hover:bg-emerald-100 font-medium transition-colors"
+              >
+                + 경기 추가
+              </button>
+            </div>
+          )}
         </div>
       )}
       {restingPlayers.length > 0 && (

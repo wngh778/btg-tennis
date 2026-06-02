@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { updateMatch, insertMatch, deleteMatch, updateSession } from '../lib/database';
-import type { Match, Player, Session } from '../types';
+import type { Match, Player, Session, MatchType } from '../types';
 import type { SubstituteTarget } from '../components/session/RoundCard';
 
 interface UseBracketEditOptions {
@@ -8,6 +8,11 @@ interface UseBracketEditOptions {
   session: Session | null;
   attendingPlayers: Player[];
   load: () => Promise<void>;
+}
+
+interface UndoSnapshot {
+  matches: Match[];
+  roundsCount: number;
 }
 
 export function useBracketEdit({
@@ -34,7 +39,33 @@ export function useBracketEdit({
   const [dragRound, setDragRound] = useState<number | null>(null);
   const [dragOverRound, setDragOverRound] = useState<number | null>(null);
 
-  // 수기 저장 후 바로 편집 모드 진입 (useGenerateModal에서 호출)
+  // ── Undo 스택 ────────────────────────────────────────────────────────────────
+  // NOTE: 이 훅은 useCallback 없이 매 렌더에 재생성되므로
+  // 핸들러 내 pendingMatches/pendingRoundsCount는 항상 최신 렌더 값을 참조함.
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+
+  /** 변경 전에 호출 — 현재 pendingMatches/roundsCount를 undo 스택에 저장 */
+  const pushUndo = () => {
+    setUndoStack(prev => [
+      ...prev.slice(-19), // 최대 20단계
+      { matches: JSON.parse(JSON.stringify(pendingMatches)), roundsCount: pendingRoundsCount },
+    ]);
+  };
+
+  const handleUndo = () => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    setPendingMatches(last.matches);
+    setPendingRoundsCount(last.roundsCount);
+    setSubstituteTarget(null);
+    setUndoStack(prev => prev.slice(0, -1));
+  };
+
+  const clearUndo = () => setUndoStack([]);
+
+  // ── 편집 모드 시작/종료 ───────────────────────────────────────────────────────
+
+  /** 수기 저장 후 바로 편집 모드 진입 (useGenerateModal에서 호출) */
   const startEditWithMatches = (newMatches: Match[], rounds: number) => {
     const copied: Match[] = JSON.parse(JSON.stringify(newMatches));
     setPendingMatches(copied);
@@ -42,6 +73,7 @@ export function useBracketEdit({
     setPendingRoundsCount(Math.max(rounds, maxRound));
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
+    clearUndo();
     setEditMode(true);
   };
 
@@ -53,6 +85,7 @@ export function useBracketEdit({
     setPendingRoundsCount(Math.max(session.rounds, maxRound));
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
+    clearUndo();
     setEditMode(true);
   };
 
@@ -62,16 +95,22 @@ export function useBracketEdit({
     setPendingRoundsCount(0);
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
+    clearUndo();
   };
+
+  // ── 라운드 수 조정 ────────────────────────────────────────────────────────────
 
   const handleRoundCountChange = (delta: number) => {
     const newCount = pendingRoundsCount + delta;
     if (newCount < 1) return;
+    pushUndo();
     if (delta < 0) {
       setPendingMatches(prev => prev.filter(m => m.round <= newCount));
     }
     setPendingRoundsCount(newCount);
   };
+
+  // ── 저장 ─────────────────────────────────────────────────────────────────────
 
   const handleEditSave = async () => {
     if (!session) return;
@@ -85,9 +124,16 @@ export function useBracketEdit({
           JSON.stringify(original.team1) !== JSON.stringify(pm.team1) ||
           JSON.stringify(original.team2) !== JSON.stringify(pm.team2) ||
           original.round !== pm.round ||
-          original.court !== pm.court;
+          original.court !== pm.court ||
+          original.matchType !== pm.matchType;
         if (changed) {
-          await updateMatch(pm.id, { team1: pm.team1, team2: pm.team2, round: pm.round, court: pm.court });
+          await updateMatch(pm.id, {
+            team1: pm.team1,
+            team2: pm.team2,
+            round: pm.round,
+            court: pm.court,
+            matchType: pm.matchType,
+          });
         }
       }
       for (const nm of pendingMatches.filter(m => m.id.startsWith('temp_'))) {
@@ -105,14 +151,18 @@ export function useBracketEdit({
       setPendingRoundsCount(0);
       setSubstituteTarget(null);
       setDeletedMatchIds(new Set());
+      clearUndo();
       load();
     } finally {
       setSaving(false);
     }
   };
 
+  // ── 자동 배정 ─────────────────────────────────────────────────────────────────
+
   const handleAutoFillRound = (round: number) => {
     if (!session) return;
+    pushUndo();
     const gameCounts = new Map<string, number>();
     attendingPlayers.forEach(p => gameCounts.set(p.id, 0));
     for (const m of pendingMatches) {
@@ -151,7 +201,10 @@ export function useBracketEdit({
     setPendingMatches(prev => [...prev, ...newMatches]);
   };
 
+  // ── 경기/라운드 삭제 ──────────────────────────────────────────────────────────
+
   const handleDeleteMatch = (matchId: string) => {
+    pushUndo();
     setPendingMatches(prev => prev.filter(m => m.id !== matchId));
     if (!matchId.startsWith('temp_')) {
       setDeletedMatchIds(prev => new Set([...prev, matchId]));
@@ -159,6 +212,7 @@ export function useBracketEdit({
   };
 
   const handleDeleteRound = (round: number) => {
+    pushUndo();
     const toDelete = pendingMatches.filter(m => m.round === round);
     toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m =>
       setDeletedMatchIds(prev => new Set([...prev, m.id]))
@@ -171,12 +225,59 @@ export function useBracketEdit({
     setPendingRoundsCount(prev => Math.max(1, prev - 1));
   };
 
+  // ── 경기 수동 추가 ────────────────────────────────────────────────────────────
+
+  const handleAddMatch = (round: number) => {
+    if (!session) return;
+    const playingInRound = new Set(
+      pendingMatches
+        .filter(m => m.round === round)
+        .flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
+    );
+    const bench = attendingPlayers.filter(p => !playingInRound.has(p.id));
+    if (bench.length < 4) {
+      alert('이 라운드에 추가할 벤치 선수가 4명 이상 필요합니다.');
+      return;
+    }
+    pushUndo();
+    const [p1, p2, p3, p4] = bench.slice(0, 4);
+    const genders = [p1, p2, p3, p4].map(p => p.gender);
+    const matchType: MatchType = genders.every(g => g === 'male') ? 'male'
+      : genders.every(g => g === 'female') ? 'female'
+      : 'mixed';
+    const matchesInRound = pendingMatches.filter(m => m.round === round);
+    const nextCourt = matchesInRound.length > 0 ? Math.max(...matchesInRound.map(m => m.court)) + 1 : 1;
+    const newMatch: Match = {
+      id: `temp_${Date.now()}`,
+      sessionId: session.id,
+      round,
+      court: nextCourt,
+      matchType,
+      team1: { player1: p1, player2: p2 },
+      team2: { player1: p3, player2: p4 },
+      isCompleted: false,
+    };
+    setPendingMatches(prev => [...prev, newMatch]);
+  };
+
+  // ── matchType 인라인 변경 ─────────────────────────────────────────────────────
+
+  const handleMatchTypeChange = (matchId: string, newType: MatchType) => {
+    pushUndo();
+    setPendingMatches(prev =>
+      prev.map(m => m.id === matchId ? { ...m, matchType: newType } : m)
+    );
+  };
+
+  // ── 드래그앤드롭: 경기 카드 ───────────────────────────────────────────────────
+
   const handleDragDrop = (targetMatchId: string) => {
     if (!dragMatchId || dragMatchId === targetMatchId) {
       setDragMatchId(null);
       setDragOverMatchId(null);
       return;
     }
+    pushUndo();
     const newPending = pendingMatches.map(m => ({ ...m }));
     const matchA = newPending.find(m => m.id === dragMatchId)!;
     const matchB = newPending.find(m => m.id === targetMatchId)!;
@@ -189,6 +290,7 @@ export function useBracketEdit({
 
   const handleDragToEmptyRound = (targetRound: number) => {
     if (!dragMatchId) return;
+    pushUndo();
     const newPending = pendingMatches.map(m => ({ ...m }));
     const match = newPending.find(m => m.id === dragMatchId);
     if (!match) return;
@@ -201,12 +303,15 @@ export function useBracketEdit({
     setDragOverEmptyRound(null);
   };
 
+  // ── 드래그앤드롭: 라운드 순서 ────────────────────────────────────────────────
+
   const handleRoundDrop = (targetRound: number) => {
     if (!dragRound || dragRound === targetRound) {
       setDragRound(null);
       setDragOverRound(null);
       return;
     }
+    pushUndo();
     setPendingMatches(prev => prev.map(m => {
       if (m.round === dragRound) return { ...m, round: targetRound };
       if (m.round === targetRound) return { ...m, round: dragRound };
@@ -215,6 +320,8 @@ export function useBracketEdit({
     setDragRound(null);
     setDragOverRound(null);
   };
+
+  // ── 드래그앤드롭: 선수 ────────────────────────────────────────────────────────
 
   const handlePlayerDragStart = (
     matchId: string,
@@ -230,6 +337,7 @@ export function useBracketEdit({
     targetSlot: 'player1' | 'player2',
   ) => {
     if (benchDragPlayer) {
+      pushUndo();
       const newPending = pendingMatches.map(m => ({
         ...m,
         team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
@@ -248,6 +356,7 @@ export function useBracketEdit({
       setDragPlayerSource(null);
       return;
     }
+    pushUndo();
     const newPending = pendingMatches.map(m => ({
       ...m,
       team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
@@ -268,6 +377,8 @@ export function useBracketEdit({
     setBenchDragPlayer(player);
     setDragPlayerSource(null);
   };
+
+  // ── 선수 클릭 / 교체 ─────────────────────────────────────────────────────────
 
   const handlePlayerClick = (
     matchId: string,
@@ -290,6 +401,7 @@ export function useBracketEdit({
 
   const handleSubstitute = (replacementPlayer: Player) => {
     if (!substituteTarget) return;
+    pushUndo();
     const newPending = pendingMatches.map(m => {
       if (m.id !== substituteTarget.matchId) return m;
       const updated = {
@@ -319,6 +431,7 @@ export function useBracketEdit({
     benchDragPlayer,
     dragRound,
     dragOverRound,
+    canUndo: undoStack.length > 0,
     // raw setters (RoundCard props에서 직접 사용)
     setSubstituteTarget,
     setDragMatchId,
@@ -335,6 +448,9 @@ export function useBracketEdit({
     handleAutoFillRound,
     handleDeleteMatch,
     handleDeleteRound,
+    handleAddMatch,
+    handleMatchTypeChange,
+    handleUndo,
     handleDragDrop,
     handleDragToEmptyRound,
     handleRoundDrop,

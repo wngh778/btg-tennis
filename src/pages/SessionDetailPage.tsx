@@ -128,10 +128,12 @@ export default function SessionDetailPage() {
     editMode, pendingMatches, pendingRoundsCount, substituteTarget, saving,
     dragMatchId, dragOverMatchId, dragOverEmptyRound,
     dragRound, dragOverRound,
+    canUndo,
     setDragMatchId, setDragOverMatchId, setDragOverEmptyRound, setDragRound, setDragOverRound,
     setSubstituteTarget,
     handleEditModeStart, handleEditCancel, handleRoundCountChange, handleEditSave,
     handleAutoFillRound, handleDeleteMatch, handleDeleteRound,
+    handleAddMatch, handleMatchTypeChange, handleUndo,
     handleDragDrop, handleDragToEmptyRound, handleRoundDrop,
     handlePlayerDragStart, handlePlayerDrop, handleBenchDragStart,
     handlePlayerClick, handleSubstitute,
@@ -1897,6 +1899,16 @@ export default function SessionDetailPage() {
               )}
               {isAdminUser && editMode && (
                 <>
+                  {/* 되돌리기 (Undo) */}
+                  <button
+                    onClick={handleUndo}
+                    disabled={!canUndo}
+                    title="되돌리기"
+                    className="px-2.5 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:opacity-30 transition-colors"
+                  >
+                    ↩ 되돌리기
+                  </button>
+                  {/* 라운드 수 조정 */}
                   <div className="flex items-center gap-1 border border-slate-300 rounded-lg overflow-hidden">
                     <button
                       onClick={() => handleRoundCountChange(-1)}
@@ -1992,8 +2004,9 @@ export default function SessionDetailPage() {
             </div>
           )}
           {editMode && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
-              선수 드래그앤드랍 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700 space-y-0.5">
+              <p>선수 클릭 → 교체 &nbsp;|&nbsp; 선수 드래그 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동</p>
+              <p>경기 유형 뱃지 클릭(↻) → 혼복/남복/여복 전환 &nbsp;|&nbsp; + 경기 추가 → 벤치 선수로 새 경기 생성</p>
             </div>
           )}
 
@@ -2075,6 +2088,8 @@ export default function SessionDetailPage() {
                 onRoundDragStart={editMode ? setDragRound : undefined}
                 onRoundDragOver={editMode ? setDragOverRound : undefined}
                 onRoundDrop={editMode ? handleRoundDrop : undefined}
+                onAddMatch={editMode ? handleAddMatch : undefined}
+                onMatchTypeChange={editMode ? handleMatchTypeChange : undefined}
               />
             ));
           })()}
