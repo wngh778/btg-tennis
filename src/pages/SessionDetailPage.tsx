@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { toPng } from 'html-to-image';
 import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
@@ -42,6 +43,10 @@ export default function SessionDetailPage() {
   });
   const [groups, setGroups] = useState<SessionGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [sharingImage, setSharingImage] = useState(false);
+
+  // 간소화 보기 캡처용 ref
+  const simpleViewCardRef = useRef<HTMLDivElement>(null);
 
   // Team setup modal (소규모 — 페이지에 유지)
   const [showTeamSetup, setShowTeamSetup] = useState(false);
@@ -1194,7 +1199,7 @@ export default function SessionDetailPage() {
       {showSimpleView && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowSimpleView(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            {/* 헤더 */}
+            {/* 헤더 (캡처 제외) */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 shrink-0">
               <button
                 onClick={() => setShowSimpleView(false)}
@@ -1206,18 +1211,51 @@ export default function SessionDetailPage() {
                 {session.title ?? formatDate(session.date)}
               </span>
               <button
-                onClick={() => {
-                  const url = window.location.origin + '/c/' + session.clubId + '/' + session.id;
-                  navigator.clipboard.writeText(url).then(() => alert('링크가 복사되었습니다')).catch(() => alert('링크가 복사되었습니다'));
+                disabled={sharingImage}
+                onClick={async () => {
+                  if (!simpleViewCardRef.current) return;
+                  setSharingImage(true);
+                  try {
+                    const el = simpleViewCardRef.current;
+                    const dataUrl = await toPng(el, {
+                      pixelRatio: 2,
+                      backgroundColor: '#ffffff',
+                      width: el.offsetWidth,
+                      height: el.scrollHeight,
+                      style: { overflow: 'visible', height: `${el.scrollHeight}px` },
+                    });
+                    const res = await fetch(dataUrl);
+                    const blob = await res.blob();
+                    const file = new File([blob], 'bracket.png', { type: 'image/png' });
+                    if (navigator.share && navigator.canShare({ files: [file] })) {
+                      await navigator.share({ files: [file], title: session.title ?? formatDate(session.date) });
+                    } else if (navigator.clipboard?.write) {
+                      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                      alert('이미지가 클립보드에 복사되었습니다');
+                    } else {
+                      const a = document.createElement('a');
+                      a.href = dataUrl;
+                      a.download = 'bracket.png';
+                      a.click();
+                    }
+                  } catch {
+                    alert('이미지 저장에 실패했습니다');
+                  } finally {
+                    setSharingImage(false);
+                  }
                 }}
-                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-40"
               >
-                공유
+                {sharingImage ? '처리중…' : '이미지 공유'}
               </button>
             </div>
 
-            {/* 경기 목록 */}
-            <div className="flex-1 overflow-y-auto">
+            {/* 경기 목록 — 이미지 캡처 대상 (타이틀 포함) */}
+            <div ref={simpleViewCardRef} className="flex-1 overflow-y-auto bg-white">
+              {/* 캡처 이미지용 타이틀 바 */}
+              <div className="px-3 py-2 text-center bg-white border-b border-slate-100">
+                <span className="font-bold text-slate-800 text-sm">{session.title ?? formatDate(session.date)}</span>
+              </div>
               {session.gameMode === 'group' && groups.length > 0 ? (
                 groups.map(group => {
                   const groupMatches = [...matches]
