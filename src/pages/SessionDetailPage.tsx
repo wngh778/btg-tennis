@@ -467,7 +467,7 @@ export default function SessionDetailPage() {
         >
           <span className="sm:hidden">상세</span><span className="hidden sm:inline">참석인원상세</span>
         </button>
-        {session.isConfirmed && (
+        {session.isGenerated && matches.some(m => m.isCompleted) && (
           <button
             onClick={() => changeTab('result')}
             className={`flex-1 flex-shrink-0 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
@@ -2140,7 +2140,7 @@ export default function SessionDetailPage() {
       )}
 
       {/* Result Tab */}
-      {tab === 'result' && session.isConfirmed && (
+      {tab === 'result' && (
         session.gameMode === 'group' ? (
           <GroupResultTab
             groups={groups}

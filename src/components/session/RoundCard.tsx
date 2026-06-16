@@ -115,6 +115,17 @@ export function MatchCard({
     setEditing(false);
   };
 
+  // 점수 입력 영역 전체에서 포커스가 벗어나면 자동 저장
+  // score1 입력 시 score2로 auto-focus되는 setTimeout과 충돌 방지를 위해 비동기 체크
+  const handleContainerBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    const currentTarget = e.currentTarget;
+    setTimeout(() => {
+      if (!currentTarget.contains(document.activeElement)) {
+        handleSave();
+      }
+    }, 0);
+  };
+
   const t1Ntrp = ((match.team1.player1.ntrp + match.team1.player2.ntrp) / 2).toFixed(1);
   const t2Ntrp = ((match.team2.player1.ntrp + match.team2.player2.ntrp) / 2).toFixed(1);
 
@@ -189,39 +200,33 @@ export function MatchCard({
         {/* Score */}
         <div className="text-center px-1 flex flex-col items-center gap-1">
           {editing ? (
-            <>
-              <div className="flex items-center gap-1">
-                <input
-                  value={score1}
-                  onChange={e => {
-                    const v = e.target.value;
-                    setScore1(v);
-                    if (v.length >= 1 && /^\d+$/.test(v)) {
-                      setTimeout(() => score2Ref.current?.focus(), 0);
-                    }
-                  }}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); score2Ref.current?.focus(); } }}
-                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  inputMode="numeric"
-                  placeholder="0"
-                  autoFocus
-                />
-                <span className="text-slate-400 text-xs font-bold">:</span>
-                <input
-                  ref={score2Ref}
-                  value={score2}
-                  onChange={e => setScore2(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
-                  className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                  inputMode="numeric"
-                  placeholder="0"
-                />
-              </div>
-              <div className="flex gap-1">
-                <button onClick={handleSave} className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">저장</button>
-                <button onClick={() => setEditing(false)} className="px-2 py-1 bg-slate-200 text-slate-600 text-xs rounded hover:bg-slate-300">취소</button>
-              </div>
-            </>
+            <div className="flex items-center gap-1" onBlur={handleContainerBlur}>
+              <input
+                value={score1}
+                onChange={e => {
+                  const v = e.target.value;
+                  setScore1(v);
+                  if (v.length >= 1 && /^\d+$/.test(v)) {
+                    setTimeout(() => score2Ref.current?.focus(), 0);
+                  }
+                }}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); score2Ref.current?.focus(); } }}
+                className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                inputMode="numeric"
+                placeholder="0"
+                autoFocus
+              />
+              <span className="text-slate-400 text-xs font-bold">:</span>
+              <input
+                ref={score2Ref}
+                value={score2}
+                onChange={e => setScore2(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
+                className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </div>
           ) : (
             <>
               {match.isCompleted ? (
