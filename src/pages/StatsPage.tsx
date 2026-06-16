@@ -99,12 +99,18 @@ export default function StatsPage() {
       }
     });
 
+    // 출석 가산점: 출석 1회당 +0.5점 (경기 결과와 별개로 출석 자체를 보상)
+    statMap.forEach((stat) => {
+      stat.points += stat.attendanceCount * 1;
+    });
+
     if (sessionId === 'all' && !filteredSessionIds) {
       attendanceCounts.forEach((count, playerId) => {
         if (!statMap.has(playerId)) {
           const info = playerInfo.get(playerId);
           if (info) {
-            statMap.set(playerId, { id: playerId, name: info.name, gender: info.gender, wins: 0, draws: 0, losses: 0, points: 0, attendanceCount: count });
+            const bonus = count * 1;
+            statMap.set(playerId, { id: playerId, name: info.name, gender: info.gender, wins: 0, draws: 0, losses: 0, points: bonus, attendanceCount: count });
           }
         }
       });
@@ -461,7 +467,7 @@ export default function StatsPage() {
       </div>
 
       <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
-        승점: 승리 +1점 · 무승부 0점 · 패배 -1점
+        승점: 승리 +1점 · 무승부 0점 · 패배 -1점 · 출석 +1점
       </div>
     </div>
   );
