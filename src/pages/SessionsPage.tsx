@@ -8,9 +8,8 @@ import type { Session, SessionType, GameMode } from '../types';
 import { formatDate } from '../utils/formatting';
 
 function getDefaultDeadlineDate(sessionDate: string): string {
-  const d = new Date(sessionDate + 'T00:00:00');
-  d.setDate(d.getDate() - 1); // 하루 전 (토요일)
-  return d.toISOString().split('T')[0];
+  // 기본값: 경기 당일
+  return sessionDate;
 }
 
 function SessionForm({
