@@ -184,7 +184,10 @@ export default function SessionDetailPage() {
     manualCourts, setManualCourts,
     manualActiveRound, setManualActiveRound,
     manualSlots, setManualSlots,
+    generateCrossGroup, setGenerateCrossGroup,
+    crossGroupPairs, setCrossGroupPairs,
     handleGenerateClick, doGenerate, handleGenerate, handleGenerateGroupMatches,
+    handleGenerateCrossGroupMatches,
     handleAiRecommend, handleMondayClick, handleMondayGenerate,
     handleFixedPairGenerate, handleManualTogglePlayer, handleManualSave,
   } = generateModal;
@@ -1492,7 +1495,101 @@ export default function SessionDetailPage() {
                 </div>
               )}
             </div>
-            {session.gameMode === 'group' && groups.length > 0 && (
+            {/* 대진 방식: 조 내부 vs 조간 토글 (그룹 모드 + 2개 이상 조) */}
+            {session.gameMode === 'group' && groups.length >= 2 && (
+              <div className="px-6 pb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 방식</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setGenerateCrossGroup(false)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${!generateCrossGroup ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    조 내부 대진
+                  </button>
+                  <button
+                    onClick={() => setGenerateCrossGroup(true)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${generateCrossGroup ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    조간 대진
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 조간 대진: 대결 쌍 설정 UI */}
+            {session.gameMode === 'group' && generateCrossGroup && (
+              <div className="px-6 pb-2 space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-slate-700">대결 쌍 설정</label>
+                    <span className="text-xs text-slate-400">
+                      코트 {Math.max(1, Math.floor(generateCourts / Math.max(1, crossGroupPairs.length)))}개/쌍
+                    </span>
+                  </div>
+                  {crossGroupPairs.map((pair, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-xl p-2">
+                      <select
+                        value={pair.groupAId}
+                        onChange={e => setCrossGroupPairs(prev => prev.map((p, i) => i === idx ? { ...p, groupAId: e.target.value } : p))}
+                        className="flex-1 text-sm border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      >
+                        {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                      </select>
+                      <span className="text-slate-500 text-sm font-bold shrink-0">vs</span>
+                      <select
+                        value={pair.groupBId}
+                        onChange={e => setCrossGroupPairs(prev => prev.map((p, i) => i === idx ? { ...p, groupBId: e.target.value } : p))}
+                        className="flex-1 text-sm border border-slate-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                      >
+                        {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                      </select>
+                      {crossGroupPairs.length > 1 && (
+                        <button
+                          onClick={() => setCrossGroupPairs(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-red-400 hover:text-red-600 shrink-0 text-xl leading-none px-1"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setCrossGroupPairs(prev => [...prev, { groupAId: groups[0].id, groupBId: groups[1 % groups.length].id }])}
+                    className="w-full py-2 text-sm text-purple-600 border border-dashed border-purple-300 rounded-xl hover:bg-purple-50 transition-colors"
+                  >
+                    + 대결 쌍 추가
+                  </button>
+                </div>
+                {/* 예상 정보 */}
+                <div className="bg-purple-50 rounded-xl p-3 space-y-1.5">
+                  {crossGroupPairs.map((pair, idx) => {
+                    const gA = groups.find(g => g.id === pair.groupAId);
+                    const gB = groups.find(g => g.id === pair.groupBId);
+                    if (!gA || !gB) return null;
+                    const pA = attendingPlayers.filter(p => gA.memberIds.includes(p.id)).length;
+                    const pB = attendingPlayers.filter(p => gB.memberIds.includes(p.id)).length;
+                    const c = Math.max(1, Math.floor(generateCourts / crossGroupPairs.length));
+                    const sameGroup = pair.groupAId === pair.groupBId;
+                    const ok = !sameGroup && pA >= 2 && pB >= 2;
+                    return (
+                      <div key={idx} className={`text-xs ${ok ? 'text-purple-700' : 'text-red-500'}`}>
+                        <span className="font-medium">{gA.name}</span>
+                        <span className="text-slate-400 mx-1">({pA}명)</span>
+                        <span className="font-bold">vs</span>
+                        <span className="font-medium ml-1">{gB.name}</span>
+                        <span className="text-slate-400 mx-1">({pB}명)</span>
+                        <span>· {c}코트 · {generateRounds}라운드</span>
+                        {sameGroup && <span className="ml-1 text-red-500">⚠ 같은 조</span>}
+                        {!sameGroup && (pA < 2 || pB < 2) && <span className="ml-1 text-red-500">⚠ 인원 부족</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 조 내부 대진: 기존 대진 생성 조 선택 */}
+            {session.gameMode === 'group' && !generateCrossGroup && groups.length > 0 && (
               <div className="px-6 pb-2 space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">대진 생성 조</label>
@@ -1577,7 +1674,15 @@ export default function SessionDetailPage() {
                 취소
               </button>
               <button
-                onClick={() => session.gameMode === 'group' ? handleGenerateGroupMatches(generateTargetGroup) : handleGenerate()}
+                onClick={() => {
+                if (session.gameMode === 'group') {
+                  generateCrossGroup
+                    ? handleGenerateCrossGroupMatches()
+                    : handleGenerateGroupMatches(generateTargetGroup);
+                } else {
+                  handleGenerate();
+                }
+              }}
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
               >
                 {session.isGenerated ? '재생성' : '생성'}
@@ -2046,14 +2151,13 @@ export default function SessionDetailPage() {
 
           {session.gameMode === 'group' && (
             <div className="flex gap-2 flex-wrap">
-              {isAdminUser && (
-                <button
-                  onClick={() => setSelectedGroupId(null)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === null ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
-                >
-                  전체
-                </button>
-              )}
+              {/* 전체 보기: 조간 대진 경기도 표시 (모든 유저 접근 가능) */}
+              <button
+                onClick={() => setSelectedGroupId(null)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === null ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                전체
+              </button>
               {groups.map(g => (
                 <button
                   key={g.id}

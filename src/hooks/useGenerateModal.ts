@@ -5,6 +5,7 @@ import {
 } from '../lib/database';
 import {
   generateMatches, generateGroupMatches, generateFixedPairMatches,
+  generateCrossGroupMatches,
   calcOptimalGroupRounds, calculateExpectedGames, findOptimalMixedRounds,
 } from '../utils/matchmaking';
 import type { PairingStrategy } from '../utils/matchmaking';
@@ -67,6 +68,10 @@ export function useGenerateModal({
   const [fixedPairCourts, setFixedPairCourts] = useState(2);
   const [fixedPairRounds, setFixedPairRounds] = useState(6);
 
+  // ── 조간 대진 설정 ───────────────────────────────────────────────────────────
+  const [generateCrossGroup, setGenerateCrossGroup] = useState(false);
+  const [crossGroupPairs, setCrossGroupPairs] = useState<{ groupAId: string; groupBId: string }[]>([]);
+
   // ── 수기 입력 모달 ───────────────────────────────────────────────────────────
   const [showManualMode, setShowManualMode] = useState(false);
   const [manualStep, setManualStep] = useState<'setup' | 'assign'>('setup');
@@ -86,6 +91,11 @@ export function useGenerateModal({
     setGenerateMixedRounds(session.mixedRounds);
     setGenerateTargetGroup('all');
     setGenerateStrategy('no-repeat-pair');
+    setGenerateCrossGroup(false);
+    // 2개 이상 조가 있으면 기본 대결 쌍 초기화
+    if (groups.length >= 2) {
+      setCrossGroupPairs([{ groupAId: groups[0].id, groupBId: groups[1].id }]);
+    }
     setShowGenerateModal(true);
   };
 
@@ -171,6 +181,60 @@ export function useGenerateModal({
       for (const m of existingGroupMatches) await deleteMatch(m.id);
       for (const m of generated) await insertMatch(m);
     }
+    await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
+    load();
+    changeTab('bracket');
+  };
+
+  const handleGenerateCrossGroupMatches = async () => {
+    if (!session) return;
+
+    // 유효한 쌍만 필터: 서로 다른 조, 각 2명 이상 참석
+    const validPairs = crossGroupPairs.filter(pair => {
+      if (pair.groupAId === pair.groupBId) return false;
+      const gA = groups.find(g => g.id === pair.groupAId);
+      const gB = groups.find(g => g.id === pair.groupBId);
+      if (!gA || !gB) return false;
+      const pA = attendingPlayers.filter(p => gA.memberIds.includes(p.id));
+      const pB = attendingPlayers.filter(p => gB.memberIds.includes(p.id));
+      return pA.length >= 2 && pB.length >= 2;
+    });
+
+    if (validPairs.length === 0) {
+      alert('유효한 대결 쌍이 없습니다.\n• 각 조에 2명 이상의 참석자가 필요합니다.\n• 같은 조끼리는 대결 쌍이 될 수 없습니다.');
+      return;
+    }
+
+    setShowGenerateModal(false);
+
+    // 기존 조간 대진 경기(groupId 없는 경기) 삭제
+    const existingCrossMatches = matches.filter(m => !m.groupId);
+    for (const m of existingCrossMatches) await deleteMatch(m.id);
+
+    // 각 대결 쌍에 코트 균등 분배 (최소 1코트)
+    const courtsPerPair = Math.max(1, Math.floor(generateCourts / validPairs.length));
+
+    let courtOffset = 0;
+    for (const pair of validPairs) {
+      const gA = groups.find(g => g.id === pair.groupAId)!;
+      const gB = groups.find(g => g.id === pair.groupBId)!;
+      const playersA = attendingPlayers.filter(p => gA.memberIds.includes(p.id));
+      const playersB = attendingPlayers.filter(p => gB.memberIds.includes(p.id));
+
+      const generated = generateCrossGroupMatches({
+        sessionId: session.id,
+        groupA: { id: gA.id, players: playersA },
+        groupB: { id: gB.id, players: playersB },
+        courts: courtsPerPair,
+        totalRounds: generateRounds,
+        courtOffset,
+        strategy: generateStrategy,
+      });
+
+      for (const m of generated) await insertMatch(m);
+      courtOffset += courtsPerPair;
+    }
+
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
     load();
     changeTab('bracket');
@@ -381,11 +445,15 @@ export function useGenerateModal({
     manualCourts, setManualCourts,
     manualActiveRound, setManualActiveRound,
     manualSlots, setManualSlots,
+    // 조간 대진
+    generateCrossGroup, setGenerateCrossGroup,
+    crossGroupPairs, setCrossGroupPairs,
     // 핸들러
     handleGenerateClick,
     doGenerate,
     handleGenerate,
     handleGenerateGroupMatches,
+    handleGenerateCrossGroupMatches,
     handleAiRecommend,
     handleMondayClick,
     handleMondayGenerate,

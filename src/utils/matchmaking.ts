@@ -744,3 +744,98 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
 
   return allMatches;
 }
+
+// ─── 조간 대진: 서로 다른 조끼리 대결 ─────────────────────────────────────────
+// team1 = groupA 선수 2명, team2 = groupB 선수 2명.
+// 같은 조 선수끼리 파트너, 상대방은 다른 조 선수.
+
+export interface CrossGroupGenerateOptions {
+  sessionId: string;
+  groupA: { id: string; players: Player[] };
+  groupB: { id: string; players: Player[] };
+  courts: number;
+  totalRounds: number;
+  courtOffset?: number; // court 번호 시작값 오프셋 (복수 대결 쌍 사용 시)
+  strategy?: PairingStrategy;
+}
+
+export function generateCrossGroupMatches(options: CrossGroupGenerateOptions): Omit<Match, 'id'>[] {
+  const {
+    sessionId, groupA, groupB, courts, totalRounds,
+    courtOffset = 0, strategy = 'no-repeat-pair',
+  } = options;
+
+  if (groupA.players.length < 2 || groupB.players.length < 2) return [];
+
+  const history: PlayerHistory = new Map();
+  const gameCountsA = new Map<string, number>(groupA.players.map(p => [p.id, 0]));
+  const gameCountsB = new Map<string, number>(groupB.players.map(p => [p.id, 0]));
+
+  const allMatches: Omit<Match, 'id'>[] = [];
+
+  for (let round = 1; round <= totalRounds; round++) {
+    // 각 코트당 A조 2명 + B조 2명 필요
+    const activeCourts = Math.min(
+      courts,
+      Math.floor(groupA.players.length / 2),
+      Math.floor(groupB.players.length / 2),
+    );
+    if (activeCourts === 0) continue;
+
+    // 게임 수 적은 선수 우선 정렬 (랜덤 전략은 완전 랜덤)
+    const byLeast = (players: Player[], counts: Map<string, number>) =>
+      [...players].sort((a, b) => {
+        if (strategy === 'random') return Math.random() - 0.5;
+        const d = (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0);
+        return d !== 0 ? d : Math.random() - 0.5;
+      });
+
+    const playingA = byLeast(groupA.players, gameCountsA).slice(0, activeCourts * 2);
+    const playingB = byLeast(groupB.players, gameCountsB).slice(0, activeCourts * 2);
+
+    let bestScore = Infinity;
+    let bestMatches: Array<{ team1: Team; team2: Team }> = [];
+
+    const attempts = strategy === 'random' ? 1 : 500;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const shuffledA = shuffle(playingA);
+      const shuffledB = shuffle(playingB);
+      const roundMatches: Array<{ team1: Team; team2: Team }> = [];
+      let totalScore = 0;
+
+      for (let c = 0; c < activeCourts; c++) {
+        const t1: Team = { player1: shuffledA[c * 2], player2: shuffledA[c * 2 + 1] };
+        const t2: Team = { player1: shuffledB[c * 2], player2: shuffledB[c * 2 + 1] };
+        totalScore += strategy === 'random' ? 0 : groupMatchScore(history, t1, t2);
+        roundMatches.push({ team1: t1, team2: t2 });
+      }
+
+      if (totalScore < bestScore) {
+        bestScore = totalScore;
+        bestMatches = roundMatches;
+      }
+    }
+
+    updateHistory(history, bestMatches);
+    playingA.forEach(p => gameCountsA.set(p.id, (gameCountsA.get(p.id) ?? 0) + 1));
+    playingB.forEach(p => gameCountsB.set(p.id, (gameCountsB.get(p.id) ?? 0) + 1));
+
+    bestMatches.forEach((m, i) => {
+      const allPlayers = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2];
+      const maleCount = allPlayers.filter(p => p.gender === 'male').length;
+      const matchType: MatchType = maleCount === 4 ? 'male' : maleCount === 0 ? 'female' : 'mixed';
+      allMatches.push({
+        sessionId,
+        // groupId 없음: 조간 경기는 특정 조에 귀속되지 않음 (전체 뷰에서 표시)
+        round,
+        court: courtOffset + i + 1,
+        matchType,
+        team1: m.team1,
+        team2: m.team2,
+        isCompleted: false,
+      });
+    });
+  }
+
+  return allMatches;
+}
