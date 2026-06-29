@@ -24,6 +24,7 @@ interface UseGenerateModalOptions {
   startEditWithMatches: (newMatches: Match[], rounds: number) => void;
   setMatches: React.Dispatch<React.SetStateAction<Match[]>>;
   setSession: React.Dispatch<React.SetStateAction<Session | null>>;
+  setSelectedGroupId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export function useGenerateModal({
@@ -37,6 +38,7 @@ export function useGenerateModal({
   startEditWithMatches,
   setMatches,
   setSession,
+  setSelectedGroupId,
 }: UseGenerateModalOptions) {
   // ── 모드 선택 모달 ──────────────────────────────────────────────────────────
   const [showModeModal, setShowModeModal] = useState(false);
@@ -200,7 +202,9 @@ export function useGenerateModal({
       for (const m of generated) await insertMatch(m);
     }
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
-    load();
+    // 생성된 조 탭으로 즉시 이동 (재생성 후 필터 동기화)
+    setSelectedGroupId(groupId === 'all' ? null : groupId);
+    await load();
     changeTab('bracket');
   };
 
@@ -244,12 +248,30 @@ export function useGenerateModal({
       const playersA = attendingPlayers.filter(p => gA.memberIds.includes(p.id));
       const playersB = attendingPlayers.filter(p => gB.memberIds.includes(p.id));
 
+      // games 모드: 인당 목표 게임 수 기반으로 라운드 수 계산
+      // 조간 대진은 1라운드당 activeCourts*2명이 각 조에서 출전
+      let pairRounds = generateRounds;
+      if (generateMode === 'games') {
+        const activeCourts = Math.min(
+          courtsPerPair,
+          Math.floor(playersA.length / 2),
+          Math.floor(playersB.length / 2),
+        );
+        // 인당 게임 수 = totalRounds * activeCourts * 2 / n
+        // → totalRounds = ceil(targetGames * n / (activeCourts * 2))
+        const n = Math.max(playersA.length, playersB.length);
+        pairRounds = activeCourts > 0 && n > 0
+          ? Math.ceil(generateTargetGames * n / (activeCourts * 2))
+          : generateRounds;
+        if (pairRounds < 1) pairRounds = 1;
+      }
+
       const generated = generateCrossGroupMatches({
         sessionId: session.id,
         groupA: { id: gA.id, players: playersA },
         groupB: { id: gB.id, players: playersB },
         courts: courtsPerPair,
-        totalRounds: generateRounds,
+        totalRounds: pairRounds,
         courtOffset,
         strategy: generateStrategy,
       });
@@ -259,7 +281,9 @@ export function useGenerateModal({
     }
 
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
-    load();
+    // 조간 대진 생성 후 전체 보기로 초기화 (재생성 후 즉시 반영)
+    setSelectedGroupId(null);
+    await load();
     changeTab('bracket');
   };
 

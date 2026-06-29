@@ -126,6 +126,7 @@ export default function SessionDetailPage() {
     startEditWithMatches: bracketEdit.startEditWithMatches,
     setMatches,
     setSession,
+    setSelectedGroupId,
   });
 
   // 훅 반환값 구조분해 (JSX에서 직접 사용)
@@ -2178,7 +2179,16 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {session.gameMode === 'group' && (
+          {session.gameMode === 'group' && (() => {
+            // 현재 생성된 경기 타입 감지
+            const hasInternalMatches = matches.some(m => m.groupId);
+            const hasCrossMatches = crossPairKeys.length > 0;
+            // 조 내부만 있으면 조 내부 탭만, 조간만 있으면 조간 탭만 표시
+            const showInternalTabs = hasInternalMatches && !hasCrossMatches;
+            const showCrossTabs = hasCrossMatches && !hasInternalMatches;
+            // 둘 다 있거나 둘 다 없으면 모두 표시
+            const showAll = !showInternalTabs && !showCrossTabs;
+            return (
             <div className="flex gap-2 flex-wrap">
               {/* 전체 보기 */}
               <button
@@ -2187,8 +2197,8 @@ export default function SessionDetailPage() {
               >
                 전체
               </button>
-              {/* 조 내부 대진 버튼 */}
-              {groups.map(g => (
+              {/* 조 내부 대진 버튼 (조간 대진만 있을 때는 숨김) */}
+              {(showInternalTabs || showAll) && groups.map(g => (
                 <button
                   key={g.id}
                   onClick={() => setSelectedGroupId(g.id)}
@@ -2197,8 +2207,8 @@ export default function SessionDetailPage() {
                   {g.name}
                 </button>
               ))}
-              {/* 조간 대진 쌍 버튼 (생성된 경기가 있을 때만 표시) */}
-              {crossPairKeys.map(pairKey => {
+              {/* 조간 대진 쌍 버튼 (조 내부 대진만 있을 때는 숨김) */}
+              {(showCrossTabs || showAll) && crossPairKeys.map(pairKey => {
                 const [idA, idB] = pairKey.split('|');
                 const gA = groups.find(g => g.id === idA);
                 const gB = groups.find(g => g.id === idB);
@@ -2221,7 +2231,8 @@ export default function SessionDetailPage() {
                 );
               })}
             </div>
-          )}
+            );
+          })()}
 
           {matches.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
