@@ -214,6 +214,23 @@ export default function SuperAdminPage() {
     loadMembers(memberClubId);
   };
 
+  const handleCreateAccount = async (member: Member, password: string) => {
+    if (!memberClubId) return;
+    const tempClient = makeTempClient();
+    const { data, error: signUpError } = await tempClient.auth.signUp({
+      email: usernameToEmail(member.name), password, options: { emailRedirectTo: undefined },
+    });
+    if (signUpError) throw signUpError;
+    if (data.user) {
+      const { error: insertError } = await tempClient.from('app_users').insert({
+        id: data.user.id, username: member.name, role: 'member',
+        club_ids: [memberClubId], default_club_id: memberClubId,
+      });
+      if (insertError) throw insertError;
+    }
+    await load();
+  };
+
   const handleUpdateUserClubs = async (u: AppUser, clubIds: string[], defaultClubId: string | null) => {
     await updateAppUser(u.id, { clubIds, defaultClubId }); load();
   };
@@ -364,6 +381,7 @@ export default function SuperAdminPage() {
                     accountUser={accountUser}
                     clubs={clubs}
                     onDeleteMember={handleDeleteMember}
+                    onCreateAccount={handleCreateAccount}
                     onUpdateUserClubs={handleUpdateUserClubs}
                     onUpdateUserRole={handleUpdateUserRole}
                     onResetPassword={handleResetPassword}
@@ -467,12 +485,13 @@ export default function SuperAdminPage() {
 
 function MemberAccountRow({
   member, accountUser, clubs,
-  onDeleteMember, onUpdateUserClubs, onUpdateUserRole, onResetPassword, onDeleteUser,
+  onDeleteMember, onCreateAccount, onUpdateUserClubs, onUpdateUserRole, onResetPassword, onDeleteUser,
 }: {
   member: Member;
   accountUser?: AppUser;
   clubs: Club[];
   onDeleteMember: (m: Member) => void;
+  onCreateAccount: (member: Member, password: string) => Promise<void>;
   onUpdateUserClubs: (u: AppUser, clubIds: string[], defaultClubId: string | null) => void;
   onUpdateUserRole: (u: AppUser, role: AppUser['role']) => void;
   onResetPassword: (u: AppUser) => void;
@@ -481,6 +500,10 @@ function MemberAccountRow({
   const [expanded, setExpanded] = useState(false);
   const [clubIds, setClubIds] = useState<string[]>(accountUser?.clubIds ?? []);
   const [defaultClubId, setDefaultClubId] = useState<string>(accountUser?.defaultClubId ?? '');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createPassword, setCreatePassword] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const roleLabel = accountUser
     ? { superadmin: '슈퍼관리자', admin: '관리자', member: '회원' }[accountUser.role]
@@ -503,7 +526,7 @@ function MemberAccountRow({
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {accountUser && (
+          {accountUser ? (
             <>
               {accountUser.role !== 'superadmin' && (
                 <button
@@ -521,10 +544,50 @@ function MemberAccountRow({
               <button onClick={() => onResetPassword(accountUser)} className="text-amber-500 hover:text-amber-700 text-sm">비번초기화</button>
               <button onClick={() => onDeleteUser(accountUser)} className="text-orange-400 hover:text-orange-600 text-sm">계정삭제</button>
             </>
+          ) : (
+            <button
+              onClick={() => { setShowCreateForm(v => !v); setCreatePassword(''); setCreateError(''); }}
+              className="text-xs px-2 py-0.5 rounded border border-green-300 text-green-600 hover:bg-green-50 transition-colors"
+            >
+              {showCreateForm ? '취소' : '계정 생성'}
+            </button>
           )}
           <button onClick={() => onDeleteMember(member)} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
         </div>
       </div>
+      {/* 계정 없을 때 인라인 계정 생성 폼 */}
+      {!accountUser && showCreateForm && (
+        <div className="px-5 pb-4 pt-2 border-t border-slate-50 bg-slate-50">
+          <p className="text-xs text-slate-500 mb-2">아이디: <span className="font-medium text-slate-700">{member.name}</span></p>
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              value={createPassword}
+              onChange={e => setCreatePassword(e.target.value)}
+              placeholder="비밀번호 (최소 6자리)"
+              minLength={6}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-44"
+            />
+            <button
+              onClick={async () => {
+                if (createPassword.length < 6) { setCreateError('비밀번호는 6자리 이상이어야 합니다.'); return; }
+                setCreating(true); setCreateError('');
+                try {
+                  await onCreateAccount(member, createPassword);
+                  setShowCreateForm(false); setCreatePassword('');
+                } catch (err: unknown) {
+                  setCreateError(err instanceof Error ? err.message : '계정 생성 실패');
+                } finally { setCreating(false); }
+              }}
+              disabled={creating || createPassword.length < 6}
+              className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+            >
+              {creating ? '생성 중...' : '생성'}
+            </button>
+          </div>
+          {createError && <p className="text-red-500 text-xs mt-1">{createError}</p>}
+        </div>
+      )}
       {expanded && accountUser && (
         <div className="px-5 pb-4 pt-2 border-t border-slate-50 bg-slate-50 space-y-3">
           <div>
