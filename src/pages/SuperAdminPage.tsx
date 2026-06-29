@@ -496,6 +496,18 @@ function MemberAccountRow({
         <div className="flex items-center gap-2 flex-shrink-0">
           {accountUser && (
             <>
+              {accountUser.role !== 'superadmin' && (
+                <button
+                  onClick={() => onUpdateUserRole(accountUser, accountUser.role === 'admin' ? 'member' : 'admin')}
+                  className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                    accountUser.role === 'admin'
+                      ? 'border-slate-300 text-slate-500 hover:bg-slate-50'
+                      : 'border-purple-300 text-purple-600 hover:bg-purple-50'
+                  }`}
+                >
+                  {accountUser.role === 'admin' ? '회원으로 변경' : '관리자 설정'}
+                </button>
+              )}
               <button onClick={() => setExpanded(v => !v)} className="text-blue-500 hover:text-blue-700 text-sm">{expanded ? '닫기' : '편집'}</button>
               <button onClick={() => onResetPassword(accountUser)} className="text-amber-500 hover:text-amber-700 text-sm">비번초기화</button>
               <button onClick={() => onDeleteUser(accountUser)} className="text-orange-400 hover:text-orange-600 text-sm">계정삭제</button>
