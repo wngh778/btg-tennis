@@ -151,7 +151,15 @@ export default function SuperAdminPage() {
     try {
       const name = newMemberName.trim();
       await addMember({ clubId: memberClubId, name, gender: newMemberGender, ntrp: newMemberNtrp, isActive: true });
-      if (newMemberCreateAccount && newMemberPassword) {
+
+      // 이미 계정이 있으면 club_ids에 현재 클럽 추가
+      const existingUser = appUsers.find(u => u.username === name);
+      if (existingUser) {
+        if (!existingUser.clubIds.includes(memberClubId)) {
+          await updateAppUser(existingUser.id, { clubIds: [...existingUser.clubIds, memberClubId] });
+        }
+      } else if (newMemberCreateAccount && newMemberPassword) {
+        // 기존 계정 없을 때만 신규 계정 생성
         const tempClient = makeTempClient();
         const { data, error: signUpError } = await tempClient.auth.signUp({
           email: usernameToEmail(name), password: newMemberPassword, options: { emailRedirectTo: undefined },
@@ -165,6 +173,7 @@ export default function SuperAdminPage() {
           if (insertError) throw insertError;
         }
       }
+
       setNewMemberName(''); setNewMemberGender('male'); setNewMemberNtrp(3.0);
       setNewMemberCreateAccount(false); setNewMemberPassword('');
       setShowMemberForm(false);
