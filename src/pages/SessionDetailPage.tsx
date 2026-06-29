@@ -5,7 +5,7 @@ import {
   getSession, getMembers, getGuests, getAttendance,
   setAttendance,
   getMatches, updateMatchScore, updateSession, updateMatch, confirmSession,
-  getSessionGroups, deleteMatch, unconfirmSession,
+  getSessionGroups, deleteMatch, unconfirmSession, saveMatches,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
@@ -260,6 +260,13 @@ export default function SessionDetailPage() {
     await confirmSession(session!.id);
     load();
     changeTab('result');
+  };
+
+  const handleResetBracket = async () => {
+    if (!confirm('모든 대진표를 초기화하시겠습니까?\n입력된 스코어도 모두 삭제됩니다.')) return;
+    await saveMatches(session!.id, []); // 전체 매치 삭제
+    await updateSession(session!.id, { isGenerated: false });
+    load();
   };
 
   // --- Bracket Editing handlers → useBracketEdit hook ---
@@ -2099,6 +2106,14 @@ export default function SessionDetailPage() {
                   className="bg-blue-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
                   {session.isConfirmed ? '재확정' : '확정'}
+                </button>
+              )}
+              {isAdminUser && matches.length > 0 && (
+                <button
+                  onClick={handleResetBracket}
+                  className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium border border-red-300 text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  대진 초기화
                 </button>
               )}
               {isAdminUser && (

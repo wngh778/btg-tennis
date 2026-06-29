@@ -229,6 +229,11 @@ export function useGenerateModal({
     const existingCrossMatches = matches.filter(m => !m.groupId);
     for (const m of existingCrossMatches) await deleteMatch(m.id);
 
+    // 해당 쌍에 포함된 조들의 내부 대진도 삭제 (조간 대진 생성 시 내부 대진은 불필요)
+    const involvedGroupIds = new Set(validPairs.flatMap(p => [p.groupAId, p.groupBId]));
+    const existingInternalMatches = matches.filter(m => m.groupId && involvedGroupIds.has(m.groupId));
+    for (const m of existingInternalMatches) await deleteMatch(m.id);
+
     // 각 대결 쌍에 코트 균등 분배 (최소 1코트)
     const courtsPerPair = Math.max(1, Math.floor(generateCourts / validPairs.length));
 
