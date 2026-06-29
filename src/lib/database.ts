@@ -120,6 +120,16 @@ export async function updateMember(id: string, data: Partial<Omit<Member, 'id' |
   if (data.isActive !== undefined) update.is_active = data.isActive;
   const { error } = await supabase.from('members').update(update).eq('id', id);
   if (error) throw error;
+
+  // 이름이 변경된 경우 attendance 스냅샷도 함께 업데이트 (공개 대진표 / 결과 순위 반영)
+  if (data.name !== undefined) {
+    const { error: attError } = await supabase
+      .from('attendance')
+      .update({ player_name: data.name })
+      .eq('player_id', id)
+      .eq('player_type', 'member');
+    if (attError) throw attError;
+  }
 }
 
 export async function deleteMember(id: string): Promise<void> {

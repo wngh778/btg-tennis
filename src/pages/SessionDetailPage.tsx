@@ -61,9 +61,13 @@ export default function SessionDetailPage() {
 
   // ── 훅 호출 전 파생 값 ─────────────────────────────────────────────────────
   // (hooks에 attendingPlayers를 전달해야 하므로 early return 앞에서 계산)
+  // 이름은 members 최신 정보 우선 사용 → 멤버 이름 수정 후 즉시 대진표에 반영
   const attendingPlayers: Player[] = attendance
     .filter(a => a.attending)
-    .map(a => ({ id: a.playerId, name: a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType }));
+    .map(a => {
+      const member = a.playerType === 'member' ? members.find(m => m.id === a.playerId) : undefined;
+      return { id: a.playerId, name: member?.name ?? a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType };
+    });
 
   // 탭 변경 + sessionStorage 저장 (탭 전환 후 복귀 시 복원용)
   const changeTab = (t: 'vote' | 'groups' | 'bracket' | 'detail' | 'result') => {
