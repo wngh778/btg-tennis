@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getClubUsers, deleteAppUser, usernameToEmail, getMembers, resetUserPassword, updateClub } from '../lib/database';
+import { getClubUsers, deleteAppUser, usernameToEmail, getMembers, resetUserPassword, updateClub, updateAppUser } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
 import { useNavigate } from 'react-router-dom';
@@ -185,6 +185,18 @@ export default function AdminPage() {
     load();
   };
 
+  const handleToggleRole = async (u: AppUser) => {
+    const newRole = u.role === 'admin' ? 'member' : 'admin';
+    const label = newRole === 'admin' ? '관리자' : '회원';
+    if (!confirm(`"${u.username}"의 역할을 ${label}(으)로 변경하시겠습니까?`)) return;
+    try {
+      await updateAppUser(u.id, { role: newRole });
+      load();
+    } catch (err: unknown) {
+      alert('역할 변경 실패: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   if (loading || loadingClubs || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (!isAdminUser) return null;
   if (!currentClub) return <div className="text-center py-16 text-slate-400">클럽이 없습니다. 슈퍼관리자에서 클럽을 추가해주세요.</div>;
@@ -291,10 +303,22 @@ export default function AdminPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
+                    u.role === 'superadmin' ? 'bg-red-100 text-red-700' : u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
                   }`}>
-                    {u.role === 'admin' ? '관리자' : '회원'}
+                    {u.role === 'superadmin' ? '슈퍼관리자' : u.role === 'admin' ? '관리자' : '회원'}
                   </span>
+                  {u.role !== 'superadmin' && (
+                    <button
+                      onClick={() => handleToggleRole(u)}
+                      className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                        u.role === 'admin'
+                          ? 'border-slate-300 text-slate-500 hover:bg-slate-50'
+                          : 'border-purple-300 text-purple-600 hover:bg-purple-50'
+                      }`}
+                    >
+                      {u.role === 'admin' ? '회원으로 변경' : '관리자 설정'}
+                    </button>
+                  )}
                   <button onClick={() => handleResetPassword(u)} className="text-amber-500 hover:text-amber-700 text-sm">비번초기화</button>
                   <button onClick={() => handleDeleteAppUser(u)} className="text-red-400 hover:text-red-600 text-sm">삭제</button>
                 </div>
