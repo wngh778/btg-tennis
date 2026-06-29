@@ -306,7 +306,7 @@ function NewSessionForm({ onSave, onCancel, defaultCourts }: { onSave: () => voi
         rounds: 6,
         mixedRounds: 2,
         votingDeadline: new Date(`${getDefaultDeadlineDate(nextDay)}T23:59:00`).toISOString(),
-        trackLate: false,
+        trackLate: true,
       }}
       onSubmit={handleSubmit}
       onCancel={onCancel}
