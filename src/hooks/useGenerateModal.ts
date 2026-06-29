@@ -92,9 +92,27 @@ export function useGenerateModal({
     setGenerateTargetGroup('all');
     setGenerateStrategy('no-repeat-pair');
     setGenerateCrossGroup(false);
-    // 2개 이상 조가 있으면 기본 대결 쌍 초기화
+    // 이름 suffix(마지막 단어) 기준으로 자동 대결 쌍 감지
+    // 예: ["OB A조","OB B조","YB A조","YB B조"] → [(OB A조 vs YB A조), (OB B조 vs YB B조)]
     if (groups.length >= 2) {
-      setCrossGroupPairs([{ groupAId: groups[0].id, groupBId: groups[1].id }]);
+      const suffixMap = new Map<string, SessionGroup[]>();
+      for (const g of groups) {
+        const parts = g.name.trim().split(/\s+/);
+        const suffix = parts[parts.length - 1];
+        if (!suffixMap.has(suffix)) suffixMap.set(suffix, []);
+        suffixMap.get(suffix)!.push(g);
+      }
+      const detectedPairs: { groupAId: string; groupBId: string }[] = [];
+      for (const [, gs] of [...suffixMap.entries()].sort(([a], [b]) => a.localeCompare(b, 'ko'))) {
+        for (let i = 0; i + 1 < gs.length; i += 2) {
+          detectedPairs.push({ groupAId: gs[i].id, groupBId: gs[i + 1].id });
+        }
+      }
+      setCrossGroupPairs(
+        detectedPairs.length > 0
+          ? detectedPairs
+          : [{ groupAId: groups[0].id, groupBId: groups[1].id }],
+      );
     }
     setShowGenerateModal(true);
   };

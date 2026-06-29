@@ -355,6 +355,20 @@ export default function SessionDetailPage() {
     setGroups(g);
   };
 
+  // 조간 대진 쌍 감지: playerId → groupId 역매핑 + 실존하는 cross 쌍 목록 (bracket 탭 필터용)
+  const playerGroupMap = new Map<string, string>();
+  for (const g of groups) {
+    for (const memberId of g.memberIds) playerGroupMap.set(memberId, g.id);
+  }
+  const crossPairKeysSet = new Set<string>();
+  for (const m of matches) {
+    if (m.groupId) continue; // 조 내부 경기 제외
+    const gA = playerGroupMap.get(m.team1.player1.id);
+    const gB = playerGroupMap.get(m.team2.player1.id);
+    if (gA && gB) crossPairKeysSet.add([gA, gB].sort().join('|'));
+  }
+  const crossPairKeys = [...crossPairKeysSet].sort();
+
   // 선수별 경기 번호 계산 (몇 번째 경기인지)
   // pendingMatches가 있으면 편집 중인 값, 없으면 저장된 matches 표시 (저장 직후 깜빡임 방지)
   const displaySource = pendingMatches.length > 0 ? pendingMatches : matches;
@@ -2151,13 +2165,14 @@ export default function SessionDetailPage() {
 
           {session.gameMode === 'group' && (
             <div className="flex gap-2 flex-wrap">
-              {/* 전체 보기: 조간 대진 경기도 표시 (모든 유저 접근 가능) */}
+              {/* 전체 보기 */}
               <button
                 onClick={() => setSelectedGroupId(null)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === null ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 전체
               </button>
+              {/* 조 내부 대진 버튼 */}
               {groups.map(g => (
                 <button
                   key={g.id}
@@ -2167,6 +2182,29 @@ export default function SessionDetailPage() {
                   {g.name}
                 </button>
               ))}
+              {/* 조간 대진 쌍 버튼 (생성된 경기가 있을 때만 표시) */}
+              {crossPairKeys.map(pairKey => {
+                const [idA, idB] = pairKey.split('|');
+                const gA = groups.find(g => g.id === idA);
+                const gB = groups.find(g => g.id === idB);
+                if (!gA || !gB) return null;
+                // 공통 suffix가 있으면 "A조 대진", 없으면 "OB vs YB"
+                const partsA = gA.name.trim().split(/\s+/);
+                const partsB = gB.name.trim().split(/\s+/);
+                const suffA = partsA[partsA.length - 1];
+                const suffB = partsB[partsB.length - 1];
+                const label = suffA === suffB ? `${suffA} 대진` : `${gA.name} vs ${gB.name}`;
+                const selKey = `cross_${pairKey}`;
+                return (
+                  <button
+                    key={selKey}
+                    onClick={() => setSelectedGroupId(selKey)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === selKey ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -2178,19 +2216,37 @@ export default function SessionDetailPage() {
           ) : (() => {
             // pendingMatches가 있으면 편집 중인 값, 없으면 저장된 matches (저장 직후 깜빡임 방지)
             const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
-            const filteredSource = session.gameMode === 'group' && selectedGroupId
-              ? bracketSource.filter(m => m.groupId === selectedGroupId)
-              : bracketSource;
-            const filteredMatches = session.gameMode === 'group' && selectedGroupId
-              ? matches.filter(m => m.groupId === selectedGroupId)
-              : matches;
-            // 조별 필터: 휴식 인원도 해당 조 인원만 표시
-            const roundAttendingPlayers = session.gameMode === 'group' && selectedGroupId
-              ? (() => {
-                  const group = groups.find(g => g.id === selectedGroupId);
-                  return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
-                })()
-              : attendingPlayers;
+            // cross_xxx: 조간 대진 쌍 필터, group.id: 조 내부 필터, null: 전체
+            const isCrossFilter = typeof selectedGroupId === 'string' && selectedGroupId.startsWith('cross_');
+            const crossPairKey = isCrossFilter ? selectedGroupId.slice(6) : null;
+            const filterByPair = (arr: Match[]) => {
+              if (!selectedGroupId || session.gameMode !== 'group') return arr;
+              if (isCrossFilter) {
+                return arr.filter(m => {
+                  if (m.groupId) return false;
+                  const gA = playerGroupMap.get(m.team1.player1.id);
+                  const gB = playerGroupMap.get(m.team2.player1.id);
+                  if (!gA || !gB) return false;
+                  return [gA, gB].sort().join('|') === crossPairKey;
+                });
+              }
+              return arr.filter(m => m.groupId === selectedGroupId);
+            };
+            const filteredSource = filterByPair(bracketSource);
+            const filteredMatches = filterByPair(matches);
+            // 휴식 인원: 해당 필터 범위 내 선수만 표시
+            const roundAttendingPlayers = (() => {
+              if (!selectedGroupId || session.gameMode !== 'group') return attendingPlayers;
+              if (isCrossFilter) {
+                const [idA, idB] = (crossPairKey ?? '').split('|');
+                const gA = groups.find(g => g.id === idA);
+                const gB = groups.find(g => g.id === idB);
+                if (!gA || !gB) return attendingPlayers;
+                return attendingPlayers.filter(p => gA.memberIds.includes(p.id) || gB.memberIds.includes(p.id));
+              }
+              const group = groups.find(g => g.id === selectedGroupId);
+              return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
+            })();
             // 관리자: pendingRoundsCount 기반 (라운드 추가/삭제 반영), 비관리자: 실제 matches 기준
             const displayRounds = isAdminUser && pendingRoundsCount > 0
               ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
