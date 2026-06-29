@@ -235,7 +235,12 @@ export default function SuperAdminPage() {
     await updateAppUser(u.id, { clubIds, defaultClubId }); load();
   };
   const handleUpdateUserRole = async (u: AppUser, role: AppUser['role']) => {
-    await updateAppUser(u.id, { role }); load();
+    // 역할 변경 시 현재 선택된 클럽이 club_ids에 없으면 자동 추가
+    const updates: { role: AppUser['role']; clubIds?: string[] } = { role };
+    if (memberClubId && !u.clubIds.includes(memberClubId)) {
+      updates.clubIds = [...u.clubIds, memberClubId];
+    }
+    await updateAppUser(u.id, updates); load();
   };
   const handleResetPassword = async (u: AppUser) => {
     if (!confirm(`"${u.username}" 비밀번호를 123456으로 초기화하시겠습니까?`)) return;
