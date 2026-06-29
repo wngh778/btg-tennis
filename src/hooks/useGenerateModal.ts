@@ -248,8 +248,8 @@ export function useGenerateModal({
       const playersA = attendingPlayers.filter(p => gA.memberIds.includes(p.id));
       const playersB = attendingPlayers.filter(p => gB.memberIds.includes(p.id));
 
-      // games 모드: 인당 목표 게임 수 기반으로 라운드 수 계산
-      // 조간 대진은 1라운드당 activeCourts*2명이 각 조에서 출전
+      // games 모드: 인당 최소 게임 수 기반으로 라운드 수 계산
+      // A군과 B군 각각에서 모든 선수가 최소 N경기를 보장하는 라운드를 구해 큰 값 사용
       let pairRounds = generateRounds;
       if (generateMode === 'games') {
         const activeCourts = Math.min(
@@ -257,12 +257,13 @@ export function useGenerateModal({
           Math.floor(playersA.length / 2),
           Math.floor(playersB.length / 2),
         );
-        // 인당 게임 수 = totalRounds * activeCourts * 2 / n
-        // → totalRounds = ceil(targetGames * n / (activeCourts * 2))
-        const n = Math.max(playersA.length, playersB.length);
-        pairRounds = activeCourts > 0 && n > 0
-          ? Math.ceil(generateTargetGames * n / (activeCourts * 2))
-          : generateRounds;
+        if (activeCourts > 0) {
+          // roundsForX = ceil(minGames * n / (activeCourts * 2))
+          // → 모든 선수가 최소 minGames경기 이상 (일부는 +1 허용)
+          const roundsForA = Math.ceil(generateTargetGames * playersA.length / (activeCourts * 2));
+          const roundsForB = Math.ceil(generateTargetGames * playersB.length / (activeCourts * 2));
+          pairRounds = Math.max(roundsForA, roundsForB);
+        }
         if (pairRounds < 1) pairRounds = 1;
       }
 

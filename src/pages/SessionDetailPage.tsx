@@ -1443,7 +1443,7 @@ export default function SessionDetailPage() {
                           generateMode === m ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
-                        {m === 'rounds' ? '총 라운드 수' : '총 경기 수'}
+                        {m === 'rounds' ? '총 라운드 수' : '균등 경기수'}
                       </button>
                     ))}
                   </div>
@@ -1474,7 +1474,7 @@ export default function SessionDetailPage() {
               )}
               {generateMode === 'games' && session.gameMode === 'group' && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">인당 경기 수</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">인당 최소 경기 수 <span className="font-normal text-slate-400">(일부 +1 가능)</span></label>
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setGenerateTargetGames(prev => Math.max(1, prev - 1))}
@@ -1593,16 +1593,40 @@ export default function SessionDetailPage() {
                     const c = Math.max(1, Math.floor(generateCourts / crossGroupPairs.length));
                     const sameGroup = pair.groupAId === pair.groupBId;
                     const ok = !sameGroup && pA >= 2 && pB >= 2;
+                    // 예상 라운드 수 및 경기 수 범위 계산
+                    const activeCourts = ok ? Math.min(c, Math.floor(pA / 2), Math.floor(pB / 2)) : 0;
+                    let previewRounds = generateRounds;
+                    if (generateMode === 'games' && activeCourts > 0) {
+                      const rA = Math.ceil(generateTargetGames * pA / (activeCourts * 2));
+                      const rB = Math.ceil(generateTargetGames * pB / (activeCourts * 2));
+                      previewRounds = Math.max(rA, rB);
+                    }
+                    const totalGamesA = previewRounds * activeCourts * 2;
+                    const totalGamesB = previewRounds * activeCourts * 2;
+                    const minGamesA = pA > 0 ? Math.floor(totalGamesA / pA) : 0;
+                    const maxGamesA = pA > 0 ? Math.ceil(totalGamesA / pA) : 0;
+                    const minGamesB = pB > 0 ? Math.floor(totalGamesB / pB) : 0;
+                    const maxGamesB = pB > 0 ? Math.ceil(totalGamesB / pB) : 0;
+                    const gamesLabelA = minGamesA === maxGamesA ? `${minGamesA}경기` : `${minGamesA}~${maxGamesA}경기`;
+                    const gamesLabelB = minGamesB === maxGamesB ? `${minGamesB}경기` : `${minGamesB}~${maxGamesB}경기`;
                     return (
-                      <div key={idx} className={`text-xs ${ok ? 'text-purple-700' : 'text-red-500'}`}>
-                        <span className="font-medium">{gA.name}</span>
-                        <span className="text-slate-400 mx-1">({pA}명)</span>
-                        <span className="font-bold">vs</span>
-                        <span className="font-medium ml-1">{gB.name}</span>
-                        <span className="text-slate-400 mx-1">({pB}명)</span>
-                        <span>· {c}코트 · {generateRounds}라운드</span>
-                        {sameGroup && <span className="ml-1 text-red-500">⚠ 같은 조</span>}
-                        {!sameGroup && (pA < 2 || pB < 2) && <span className="ml-1 text-red-500">⚠ 인원 부족</span>}
+                      <div key={idx} className={`text-xs space-y-0.5 ${ok ? 'text-purple-700' : 'text-red-500'}`}>
+                        <div>
+                          <span className="font-medium">{gA.name}</span>
+                          <span className="text-slate-400 mx-1">({pA}명)</span>
+                          <span className="font-bold">vs</span>
+                          <span className="font-medium ml-1">{gB.name}</span>
+                          <span className="text-slate-400 mx-1">({pB}명)</span>
+                          <span>· {c}코트 · {previewRounds}라운드</span>
+                          {sameGroup && <span className="ml-1 text-red-500">⚠ 같은 조</span>}
+                          {!sameGroup && (pA < 2 || pB < 2) && <span className="ml-1 text-red-500">⚠ 인원 부족</span>}
+                        </div>
+                        {ok && activeCourts > 0 && (
+                          <div className="text-purple-500">
+                            인당 경기 수 — {gA.name}: <span className="font-semibold">{gamesLabelA}</span>
+                            {' / '}{gB.name}: <span className="font-semibold">{gamesLabelB}</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
