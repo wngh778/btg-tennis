@@ -9,10 +9,20 @@ export function GroupResultTab({
   attendingPlayers: Player[];
   isAdmin: boolean;
 }) {
+  // 조간 대진 경기 (groupId 없음)
+  const crossMatches = matches.filter(m => !m.groupId);
+  const hasCrossMatches = crossMatches.length > 0;
+
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
-    groups.length > 0 ? groups[0].id : null
+    groups.length > 0 ? groups[0].id : (hasCrossMatches ? 'cross' : null)
   );
   const showAll = isAdmin && selectedGroupId === null;
+
+  // 선수→조 매핑 (조간 대진 결과 계산용)
+  const playerGroupMap = new Map<string, SessionGroup>();
+  for (const g of groups) {
+    for (const id of g.memberIds) playerGroupMap.set(id, g);
+  }
 
   function calcGroupStandings(group: SessionGroup) {
     const groupMatches = matches.filter(m => m.groupId === group.id && m.isCompleted);
@@ -35,14 +45,14 @@ export function GroupResultTab({
         const s = stats.get(p.id)!;
         s.games++;
         if (team1Won) s.wins++; else s.losses++;
-        s.scoreDiff += diff; // s1 - s2
+        s.scoreDiff += diff;
       }
       for (const p of [m.team2.player1, m.team2.player2]) {
         if (!stats.has(p.id)) stats.set(p.id, { name: p.name, wins: 0, losses: 0, scoreDiff: 0, games: 0 });
         const s = stats.get(p.id)!;
         s.games++;
         if (!team1Won) s.wins++; else s.losses++;
-        s.scoreDiff -= diff; // s2 - s1
+        s.scoreDiff -= diff;
       }
     }
 
@@ -50,6 +60,41 @@ export function GroupResultTab({
       .map(([id, s]) => ({ id, ...s }))
       .sort((a, b) => b.wins - a.wins || b.scoreDiff - a.scoreDiff || a.name.localeCompare(b.name, 'ko'));
   }
+
+  // 조간 대진 쌍별 집계
+  type PairResult = {
+    groupA: SessionGroup; groupB: SessionGroup;
+    aWins: number; bWins: number;
+    matchCount: number; completedCount: number;
+    pairMatches: Match[];
+  };
+
+  const crossPairsMap = new Map<string, PairResult>();
+  for (const m of crossMatches) {
+    const gA = playerGroupMap.get(m.team1.player1.id);
+    const gB = playerGroupMap.get(m.team2.player1.id);
+    if (!gA || !gB) continue;
+    // pairKey는 정렬해서 동일 방향 유지
+    const [keyA, keyB] = gA.id < gB.id ? [gA, gB] : [gB, gA];
+    const pairKey = `${keyA.id}|${keyB.id}`;
+    if (!crossPairsMap.has(pairKey)) {
+      crossPairsMap.set(pairKey, { groupA: keyA, groupB: keyB, aWins: 0, bWins: 0, matchCount: 0, completedCount: 0, pairMatches: [] });
+    }
+    const pr = crossPairsMap.get(pairKey)!;
+    pr.matchCount++;
+    pr.pairMatches.push(m);
+    if (m.isCompleted && m.score1 !== undefined && m.score2 !== undefined) {
+      const s1 = parseInt(m.score1, 10);
+      const s2 = parseInt(m.score2, 10);
+      if (!isNaN(s1) && !isNaN(s2)) {
+        pr.completedCount++;
+        // team1이 keyA 소속이면 s1>s2면 A승
+        const team1IsA = playerGroupMap.get(m.team1.player1.id)?.id === keyA.id;
+        if (team1IsA ? s1 > s2 : s2 > s1) pr.aWins++; else pr.bWins++;
+      }
+    }
+  }
+  const crossPairs = [...crossPairsMap.values()];
 
   const medals = ['🥇', '🥈', '🥉'];
 
@@ -74,11 +119,20 @@ export function GroupResultTab({
             {g.name}
           </button>
         ))}
+        {hasCrossMatches && (
+          <button
+            onClick={() => setSelectedGroupId('cross')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === 'cross' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            조간 대진
+          </button>
+        )}
       </div>
 
-      {/* 조별 순위 */}
-      {!showAll && selectedGroupId && (() => {
+      {/* 개별 조 순위 */}
+      {!showAll && selectedGroupId && selectedGroupId !== 'cross' && (() => {
         const group = groups.find(g => g.id === selectedGroupId)!;
+        if (!group) return null;
         const standings = calcGroupStandings(group);
         const groupMatches = matches.filter(m => m.groupId === group.id);
         const completedCount = groupMatches.filter(m => m.isCompleted).length;
@@ -125,6 +179,89 @@ export function GroupResultTab({
         );
       })()}
 
+      {/* 조간 대진 결과 */}
+      {selectedGroupId === 'cross' && (
+        <div className="space-y-6">
+          {crossPairs.length === 0 ? (
+            <div className="text-center py-8 text-slate-400 text-sm">조간 대진 결과가 없습니다.</div>
+          ) : crossPairs.map(pr => {
+            const sortedMatches = [...pr.pairMatches].sort((a, b) => a.round - b.round || a.court - b.court);
+            const aLeading = pr.aWins > pr.bWins;
+            const bLeading = pr.bWins > pr.aWins;
+            return (
+              <div key={`${pr.groupA.id}|${pr.groupB.id}`} className="space-y-3">
+                {/* 쌍별 전적 카드 */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 text-center">
+                      <p className={`font-bold text-base ${aLeading ? 'text-green-600' : 'text-slate-500'}`}>{pr.groupA.name}</p>
+                      <p className={`text-4xl font-bold mt-1 ${aLeading ? 'text-green-600' : 'text-slate-700'}`}>{pr.aWins}</p>
+                    </div>
+                    <div className="text-center shrink-0">
+                      <p className="text-slate-300 text-xl font-light">vs</p>
+                      <p className="text-xs text-slate-400 mt-1">{pr.completedCount}/{pr.matchCount} 완료</p>
+                    </div>
+                    <div className="flex-1 text-center">
+                      <p className={`font-bold text-base ${bLeading ? 'text-green-600' : 'text-slate-500'}`}>{pr.groupB.name}</p>
+                      <p className={`text-4xl font-bold mt-1 ${bLeading ? 'text-green-600' : 'text-slate-700'}`}>{pr.bWins}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 경기별 결과 */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-5 py-3 bg-orange-50 border-b border-orange-100">
+                    <p className="text-xs font-semibold text-orange-700">경기별 결과</p>
+                  </div>
+                  {sortedMatches.map((m, idx) => {
+                    const completed = m.isCompleted && m.score1 !== undefined && m.score2 !== undefined;
+                    const s1 = completed ? parseInt(m.score1!, 10) : 0;
+                    const s2 = completed ? parseInt(m.score2!, 10) : 0;
+                    const team1Won = s1 > s2;
+                    const gTeam1 = playerGroupMap.get(m.team1.player1.id);
+                    const gTeam2 = playerGroupMap.get(m.team2.player1.id);
+                    return (
+                      <div key={m.id} className={`px-4 py-3 border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 w-5 shrink-0">{m.round}R</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              {gTeam1 && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 shrink-0">{gTeam1.name}</span>
+                              )}
+                              <span className={`text-sm truncate ${completed && team1Won ? 'font-bold text-green-700' : 'text-slate-600'}`}>
+                                {m.team1.player1.name} / {m.team1.player2.name}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="shrink-0 px-2 text-center min-w-14">
+                            {completed ? (
+                              <span className="font-bold text-slate-800 tabular-nums">{m.score1} : {m.score2}</span>
+                            ) : (
+                              <span className="text-slate-300 text-sm">vs</span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 text-right">
+                            <div className="flex items-center gap-1 justify-end">
+                              <span className={`text-sm truncate ${completed && !team1Won ? 'font-bold text-green-700' : 'text-slate-600'}`}>
+                                {m.team2.player1.name} / {m.team2.player2.name}
+                              </span>
+                              {gTeam2 && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 shrink-0">{gTeam2.name}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* 전체 통합 뷰 (관리자) */}
       {showAll && (
         <div className="space-y-4">
@@ -151,6 +288,24 @@ export function GroupResultTab({
               </div>
             );
           })}
+          {hasCrossMatches && crossPairs.map(pr => (
+            <div key={`cross_${pr.groupA.id}|${pr.groupB.id}`} className="bg-white rounded-2xl border border-orange-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 bg-orange-50 border-b border-orange-100">
+                <h3 className="font-bold text-orange-700">조간 대진 — {pr.groupA.name} vs {pr.groupB.name}</h3>
+              </div>
+              <div className="px-5 py-4 flex items-center gap-4">
+                <div className="flex-1 text-center">
+                  <p className="text-sm font-semibold text-slate-600">{pr.groupA.name}</p>
+                  <p className="text-2xl font-bold text-slate-800">{pr.aWins}승</p>
+                </div>
+                <span className="text-slate-300 font-light text-xl">vs</span>
+                <div className="flex-1 text-center">
+                  <p className="text-sm font-semibold text-slate-600">{pr.groupB.name}</p>
+                  <p className="text-2xl font-bold text-slate-800">{pr.bWins}승</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

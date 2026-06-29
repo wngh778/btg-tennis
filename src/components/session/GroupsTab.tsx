@@ -2,6 +2,12 @@ import { useState } from 'react';
 import type { Player, Member, SessionGroup } from '../../types';
 import { addSessionGroup, updateSessionGroup, deleteSessionGroup } from '../../lib/database';
 
+// 드래그 중인 선수 정보
+type DraggingInfo = {
+  playerId: string;
+  sourceGroupId: string | null; // null = 미배정 영역
+};
+
 export function GroupsTab({
   groups, session, members, attendingPlayers, onGroupsChanged, isAdmin: _isAdmin
 }: {
@@ -14,6 +20,8 @@ export function GroupsTab({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [dragging, setDragging] = useState<DraggingInfo | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null); // group.id | 'unassigned'
 
   const assignedIds = new Set(groups.flatMap(g => g.memberIds));
   // 참석 투표한 인원이 있으면 그 인원 기준, 없으면 전체 활성 멤버 기준
@@ -62,15 +70,78 @@ export function GroupsTab({
     onGroupsChanged();
   };
 
+  // ── 드래그앤드랍 핸들러 ──────────────────────────────────────────────────
+
+  const onDragStart = (playerId: string, sourceGroupId: string | null) => {
+    setDragging({ playerId, sourceGroupId });
+  };
+
+  const onDragEnd = () => {
+    setDragging(null);
+    setDragOverId(null);
+  };
+
+  /** 드롭: 특정 조 카드 위에 */
+  const onDropToGroup = async (targetGroupId: string) => {
+    setDragOverId(null);
+    if (!dragging) return;
+    if (dragging.sourceGroupId === targetGroupId) return; // 같은 조면 무시
+    await handleAddToGroup(targetGroupId, dragging.playerId);
+    setDragging(null);
+  };
+
+  /** 드롭: 미배정 영역 위에 → 조에서 제거 */
+  const onDropToUnassigned = async () => {
+    setDragOverId(null);
+    if (!dragging || !dragging.sourceGroupId) return; // 이미 미배정이면 무시
+    await handleRemoveFromGroup(dragging.sourceGroupId, dragging.playerId);
+    setDragging(null);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-4">
       {/* 미배정 인원 */}
-      {unassigned.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-          <h3 className="font-semibold text-amber-800 mb-2 text-sm">미배정 인원 ({unassigned.length}명)</h3>
+      <div
+        className={`rounded-2xl p-4 border-2 transition-colors ${
+          dragging && dragging.sourceGroupId !== null && dragOverId === 'unassigned'
+            ? 'bg-amber-100 border-amber-400 border-dashed'
+            : unassigned.length > 0
+              ? 'bg-amber-50 border-amber-200'
+              : 'bg-slate-50 border-dashed border-slate-200'
+        }`}
+        onDragOver={e => {
+          // 조에 배정된 선수를 드래그할 때만 미배정 영역을 드롭 존으로 활성화
+          if (dragging && dragging.sourceGroupId !== null) {
+            e.preventDefault();
+            setDragOverId('unassigned');
+          }
+        }}
+        onDragLeave={() => {
+          if (dragOverId === 'unassigned') setDragOverId(null);
+        }}
+        onDrop={e => { e.preventDefault(); onDropToUnassigned(); }}
+      >
+        <h3 className={`font-semibold mb-2 text-sm ${
+          dragOverId === 'unassigned' ? 'text-amber-700' : 'text-amber-800'
+        }`}>
+          {dragOverId === 'unassigned'
+            ? '여기에 놓으면 미배정으로 이동합니다'
+            : `미배정 인원 (${unassigned.length}명)`}
+        </h3>
+        {unassigned.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {unassigned.map(p => (
-              <div key={p.id} className="flex items-center gap-1 bg-white border border-amber-200 rounded-lg px-2 py-1">
+              <div
+                key={p.id}
+                draggable
+                onDragStart={() => onDragStart(p.id, null)}
+                onDragEnd={onDragEnd}
+                className={`flex items-center gap-1 bg-white border border-amber-200 rounded-lg px-2 py-1 cursor-grab active:cursor-grabbing select-none transition-opacity ${
+                  dragging?.playerId === p.id ? 'opacity-40' : 'opacity-100'
+                }`}
+              >
                 <span className={`w-2 h-2 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                 <span className="text-sm font-medium text-slate-700">{p.name}</span>
                 <div className="flex gap-1 ml-1">
@@ -87,17 +158,47 @@ export function GroupsTab({
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-amber-400">
+            {dragOverId === 'unassigned' ? '' : '모든 선수가 배정됐습니다'}
+          </p>
+        )}
+      </div>
 
       {/* 각 조 카드 */}
       {groups.map(group => {
         const groupPlayers = group.memberIds
           .map(id => candidatePlayers.find(p => p.id === id))
           .filter(Boolean) as Player[];
+
+        const isDropTarget = dragOverId === group.id;
+
         return (
-          <div key={group.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center justify-between">
+          <div
+            key={group.id}
+            className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-colors ${
+              isDropTarget
+                ? 'border-purple-400 shadow-purple-100'
+                : 'border-slate-200'
+            }`}
+            onDragOver={e => {
+              if (dragging && dragging.sourceGroupId !== group.id) {
+                e.preventDefault();
+                setDragOverId(group.id);
+              }
+            }}
+            onDragLeave={e => {
+              // 자식 요소로 이동 시 leave 이벤트 방지
+              const related = e.relatedTarget as Node | null;
+              if (!e.currentTarget.contains(related)) {
+                if (dragOverId === group.id) setDragOverId(null);
+              }
+            }}
+            onDrop={e => { e.preventDefault(); onDropToGroup(group.id); }}
+          >
+            <div className={`px-5 py-3 border-b flex items-center justify-between transition-colors ${
+              isDropTarget ? 'bg-purple-100 border-purple-200' : 'bg-purple-50 border-purple-100'
+            }`}>
               {editingId === group.id ? (
                 <div className="flex items-center gap-2 flex-1">
                   <input
@@ -111,7 +212,11 @@ export function GroupsTab({
                 </div>
               ) : (
                 <>
-                  <h3 className="font-bold text-purple-800">{group.name} <span className="font-normal text-purple-600 text-sm">({groupPlayers.length}명)</span></h3>
+                  <h3 className="font-bold text-purple-800">
+                    {group.name}{' '}
+                    <span className="font-normal text-purple-600 text-sm">({groupPlayers.length}명)</span>
+                    {isDropTarget && <span className="ml-2 text-xs text-purple-500 font-normal">여기에 놓기</span>}
+                  </h3>
                   <div className="flex gap-2">
                     <button
                       onClick={() => { setEditingId(group.id); setEditName(group.name); }}
@@ -129,21 +234,34 @@ export function GroupsTab({
                 </>
               )}
             </div>
-            <div className="p-3 flex flex-wrap gap-2 min-h-12">
+            <div className={`p-3 flex flex-wrap gap-2 min-h-12 transition-colors ${
+              isDropTarget ? 'bg-purple-50' : ''
+            }`}>
               {groupPlayers.map(p => (
-                <div key={p.id} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                <div
+                  key={p.id}
+                  draggable
+                  onDragStart={() => onDragStart(p.id, group.id)}
+                  onDragEnd={onDragEnd}
+                  className={`flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-grab active:cursor-grabbing select-none transition-opacity ${
+                    dragging?.playerId === p.id ? 'opacity-40' : 'opacity-100'
+                  }`}
+                >
                   <span className={`w-2 h-2 rounded-full ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                   <span className="text-sm font-medium text-slate-700">{p.name}</span>
                   <button
                     onClick={() => handleRemoveFromGroup(group.id, p.id)}
                     className="text-slate-300 hover:text-red-500 ml-0.5 transition-colors"
+                    onMouseDown={e => e.stopPropagation()} // 클릭 시 드래그 시작 방지
                   >
                     ×
                   </button>
                 </div>
               ))}
               {groupPlayers.length === 0 && (
-                <p className="text-sm text-slate-300 self-center">멤버를 배정하세요</p>
+                <p className="text-sm text-slate-300 self-center">
+                  {isDropTarget ? '' : '멤버를 배정하세요'}
+                </p>
               )}
             </div>
           </div>
