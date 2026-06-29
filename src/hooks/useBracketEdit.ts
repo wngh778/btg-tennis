@@ -43,10 +43,20 @@ export function useBracketEdit({
   // 핸들러 내 pendingMatches/pendingRoundsCount는 항상 최신 렌더 값을 참조함.
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
 
-  // matches가 바뀔 때 (로드 완료 또는 저장 후 재로드) pendingMatches 자동 초기화
-  // pendingMatches가 비어있을 때만 초기화 → 편집 중인 변경사항 보존
+  // matches가 바뀔 때 pendingMatches 자동 초기화
+  // - matches가 비어있으면 무조건 초기화 (대진 초기화 / 첫 로드)
+  // - pendingMatches가 비어있으면 초기화 (최초 로드)
+  // - pendingMatches의 경기들이 새 matches에 하나도 없으면 초기화 (재생성으로 완전 교체)
+  // - pendingMatches에 새 matches의 경기가 있으면 유지 (편집 중 보존)
   useEffect(() => {
-    if (matches.length > 0 && pendingMatches.length === 0) {
+    if (matches.length === 0) {
+      setPendingMatches([]);
+      setPendingRoundsCount(0);
+      return;
+    }
+    const newMatchIds = new Set(matches.map(m => m.id));
+    const hasOverlap = pendingMatches.some(m => newMatchIds.has(m.id));
+    if (pendingMatches.length === 0 || !hasOverlap) {
       const copied: Match[] = JSON.parse(JSON.stringify(matches));
       setPendingMatches(copied);
       const maxRound = Math.max(...copied.map(m => m.round));
