@@ -130,19 +130,22 @@ export default function SessionDetailPage() {
 
   // 훅 반환값 구조분해 (JSX에서 직접 사용)
   const {
-    editMode, pendingMatches, pendingRoundsCount, substituteTarget, saving,
+    pendingMatches, pendingRoundsCount, substituteTarget, saving,
     dragMatchId, dragOverMatchId, dragOverEmptyRound,
     dragRound, dragOverRound,
     canUndo,
     setDragMatchId, setDragOverMatchId, setDragOverEmptyRound, setDragRound, setDragOverRound,
     setSubstituteTarget,
-    handleEditModeStart, handleEditCancel, handleRoundCountChange, handleEditSave,
+    handleEditCancel, handleRoundCountChange, handleEditSave,
     handleAutoFillRound, handleDeleteMatch, handleDeleteRound,
     handleAddMatch, handleMatchTypeChange, handleUndo,
     handleDragDrop, handleDragToEmptyRound, handleRoundDrop,
     handlePlayerDragStart, handlePlayerDrop, handleBenchDragStart,
     handlePlayerClick, handleSubstitute,
   } = bracketEdit;
+
+  // 관리자는 항상 편집 가능 — 별도 편집 모드 토글 불필요
+  const editMode = isAdminUser;
 
   const {
     showGuestForm, guestName, guestGender, guestNtrp,
@@ -350,7 +353,8 @@ export default function SessionDetailPage() {
   };
 
   // 선수별 경기 번호 계산 (몇 번째 경기인지)
-  const displaySource = editMode ? pendingMatches : matches;
+  // pendingMatches가 있으면 편집 중인 값, 없으면 저장된 matches 표시 (저장 직후 깜빡임 방지)
+  const displaySource = pendingMatches.length > 0 ? pendingMatches : matches;
   const matchGameNumbers = new Map<string, number>(); // `${matchId}_${playerId}` → N번째
   const cumGameCount = new Map<string, number>();
   for (const m of [...displaySource].sort((a, b) => a.round - b.round || a.court - b.court)) {
@@ -1908,7 +1912,7 @@ export default function SessionDetailPage() {
               참석 인원 {attendingPlayers.length}명 · 남{maleAttending} 여{femaleAttending}
             </p>
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
-              {matches.length > 0 && !editMode && (
+              {matches.length > 0 && (
                 <>
                   <button
                     onClick={() => {
@@ -1927,15 +1931,7 @@ export default function SessionDetailPage() {
                   </button>
                 </>
               )}
-              {isAdminUser && !editMode && matches.length > 0 && (
-                <button
-                  onClick={handleEditModeStart}
-                  className="bg-amber-500 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-amber-600 transition-colors"
-                >
-                  편집
-                </button>
-              )}
-              {isAdminUser && editMode && (
+              {isAdminUser && matches.length > 0 && (
                 <>
                   {/* 되돌리기 (Undo) */}
                   <button
@@ -1978,7 +1974,7 @@ export default function SessionDetailPage() {
                   </button>
                 </>
               )}
-              {isAdminUser && !editMode && session.isGenerated && (!session.isConfirmed || isSuperAdmin) && (
+              {isAdminUser && session.isGenerated && (!session.isConfirmed || isSuperAdmin) && (
                 <button
                   onClick={handleConfirm}
                   className="bg-blue-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -1986,7 +1982,7 @@ export default function SessionDetailPage() {
                   {session.isConfirmed ? '재확정' : '확정'}
                 </button>
               )}
-              {isAdminUser && !editMode && (
+              {isAdminUser && (
                 <button
                   onClick={() => setShowModeModal(true)}
                   className="bg-green-600 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors"
@@ -2018,7 +2014,7 @@ export default function SessionDetailPage() {
               )}
             </div>
           )}
-          {!editMode && (removedFromBracket.length > 0 || addedToBracket.length > 0) && isAdminUser && (
+          {(removedFromBracket.length > 0 || addedToBracket.length > 0) && isAdminUser && (
             <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 text-sm text-orange-800">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-0.5">
@@ -2027,7 +2023,7 @@ export default function SessionDetailPage() {
                     <p className="text-xs">불참으로 변경: {removedFromBracket.map(p => p.name).join(', ')} → 해당 경기 삭제</p>
                   )}
                   {addedToBracket.length > 0 && (
-                    <p className="text-xs">새 참석: {addedToBracket.map(p => p.name).join(', ')} → 편집 모드에서 추가 필요</p>
+                    <p className="text-xs">새 참석: {addedToBracket.map(p => p.name).join(', ')} → 경기 추가 버튼으로 배정 가능</p>
                   )}
                 </div>
                 {removedFromBracket.length > 0 && (
@@ -2041,7 +2037,7 @@ export default function SessionDetailPage() {
               </div>
             </div>
           )}
-          {editMode && (
+          {isAdminUser && matches.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700 space-y-0.5">
               <p>선수 클릭 → 교체 &nbsp;|&nbsp; 선수 드래그 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동</p>
               <p>경기 유형 뱃지 클릭(↻) → 혼복/남복/여복 전환 &nbsp;|&nbsp; + 경기 추가 → 벤치 선수로 새 경기 생성</p>
@@ -2070,16 +2066,17 @@ export default function SessionDetailPage() {
             </div>
           )}
 
-          {matches.length === 0 && !editMode ? (
+          {matches.length === 0 ? (
             <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
               <p className="text-slate-400 text-lg mb-2">아직 대진표가 없습니다.</p>
               {isAdminUser && <p className="text-slate-400 text-sm">참석 투표 완료 후 대진표를 생성하세요.</p>}
             </div>
           ) : (() => {
-            const displaySource = editMode ? pendingMatches : matches;
+            // pendingMatches가 있으면 편집 중인 값, 없으면 저장된 matches (저장 직후 깜빡임 방지)
+            const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
             const filteredSource = session.gameMode === 'group' && selectedGroupId
-              ? displaySource.filter(m => m.groupId === selectedGroupId)
-              : displaySource;
+              ? bracketSource.filter(m => m.groupId === selectedGroupId)
+              : bracketSource;
             const filteredMatches = session.gameMode === 'group' && selectedGroupId
               ? matches.filter(m => m.groupId === selectedGroupId)
               : matches;
@@ -2090,7 +2087,8 @@ export default function SessionDetailPage() {
                   return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
                 })()
               : attendingPlayers;
-            const displayRounds = editMode
+            // 관리자: pendingRoundsCount 기반 (라운드 추가/삭제 반영), 비관리자: 실제 matches 기준
+            const displayRounds = isAdminUser && pendingRoundsCount > 0
               ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
               : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
             return displayRounds.map(round => (

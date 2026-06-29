@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { updateMatch, insertMatch, deleteMatch, updateSession } from '../lib/database';
 import type { Match, Player, Session, MatchType } from '../types';
 import type { SubstituteTarget } from '../components/session/RoundCard';
@@ -21,7 +21,6 @@ export function useBracketEdit({
   attendingPlayers,
   load,
 }: UseBracketEditOptions) {
-  const [editMode, setEditMode] = useState(false);
   const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
   const [pendingRoundsCount, setPendingRoundsCount] = useState(0);
   const [substituteTarget, setSubstituteTarget] = useState<SubstituteTarget>(null);
@@ -44,6 +43,18 @@ export function useBracketEdit({
   // 핸들러 내 pendingMatches/pendingRoundsCount는 항상 최신 렌더 값을 참조함.
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
 
+  // matches가 바뀔 때 (로드 완료 또는 저장 후 재로드) pendingMatches 자동 초기화
+  // pendingMatches가 비어있을 때만 초기화 → 편집 중인 변경사항 보존
+  useEffect(() => {
+    if (matches.length > 0 && pendingMatches.length === 0) {
+      const copied: Match[] = JSON.parse(JSON.stringify(matches));
+      setPendingMatches(copied);
+      const maxRound = Math.max(...copied.map(m => m.round));
+      setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches]);
+
   /** 변경 전에 호출 — 현재 pendingMatches/roundsCount를 undo 스택에 저장 */
   const pushUndo = () => {
     setUndoStack(prev => [
@@ -63,9 +74,9 @@ export function useBracketEdit({
 
   const clearUndo = () => setUndoStack([]);
 
-  // ── 편집 모드 시작/종료 ───────────────────────────────────────────────────────
+  // ── 편집 관련 ───────────────────────────────────────────────────────
 
-  /** 수기 저장 후 바로 편집 모드 진입 (useGenerateModal에서 호출) */
+  /** 대진표 생성 직후 pendingMatches 세팅 (useGenerateModal에서 호출) */
   const startEditWithMatches = (newMatches: Match[], rounds: number) => {
     const copied: Match[] = JSON.parse(JSON.stringify(newMatches));
     setPendingMatches(copied);
@@ -74,25 +85,14 @@ export function useBracketEdit({
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
     clearUndo();
-    setEditMode(true);
   };
 
-  const handleEditModeStart = () => {
-    if (!session) return;
+  /** 취소: 변경사항 버리고 저장된 matches로 되돌림 */
+  const handleEditCancel = () => {
     const copied: Match[] = JSON.parse(JSON.stringify(matches));
     setPendingMatches(copied);
-    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : session.rounds;
-    setPendingRoundsCount(Math.max(session.rounds, maxRound));
-    setSubstituteTarget(null);
-    setDeletedMatchIds(new Set());
-    clearUndo();
-    setEditMode(true);
-  };
-
-  const handleEditCancel = () => {
-    setEditMode(false);
-    setPendingMatches([]);
-    setPendingRoundsCount(0);
+    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : session?.rounds ?? 0;
+    setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
     clearUndo();
@@ -146,8 +146,7 @@ export function useBracketEdit({
       if (pendingRoundsCount !== session.rounds) {
         await updateSession(session.id, { rounds: pendingRoundsCount });
       }
-      setEditMode(false);
-      setPendingMatches([]);
+      setPendingMatches([]); // useEffect가 load() 완료 후 matches에서 재초기화
       setPendingRoundsCount(0);
       setSubstituteTarget(null);
       setDeletedMatchIds(new Set());
@@ -418,7 +417,6 @@ export function useBracketEdit({
 
   return {
     // state
-    editMode,
     pendingMatches,
     pendingRoundsCount,
     substituteTarget,
@@ -441,7 +439,6 @@ export function useBracketEdit({
     setDragOverRound,
     // handlers
     startEditWithMatches,
-    handleEditModeStart,
     handleEditCancel,
     handleRoundCountChange,
     handleEditSave,
