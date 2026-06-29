@@ -103,13 +103,16 @@ export default function SessionDetailPage() {
   useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
 
   // 조별경기: 그룹 로드 후 내 그룹 자동 선택
+  // 단, 조간 대진만 있는 경우(groupId=null인 경기가 전부)에는 전체(null) 유지
   useEffect(() => {
     if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {
+      const hasCrossOnly = matches.length > 0 && matches.every(m => !m.groupId);
+      if (hasCrossOnly) return; // 조간 대진만 있으면 전체(null) 유지 → 바로 보임
       const myMemberInEffect = appUser ? members.filter(m => m.isActive).find(m => m.name === appUser.username) ?? null : null;
       const myGroupInEffect = myMemberInEffect ? groups.find(g => g.memberIds.includes(myMemberInEffect.id)) ?? null : null;
       setSelectedGroupId(myGroupInEffect?.id ?? groups[0]?.id ?? null);
     }
-  }, [groups, session?.gameMode]);
+  }, [groups, matches, session?.gameMode]);
 
   // ── 커스텀 훅 (React Rules of Hooks: early return 앞에 위치) ───────────────
   // 브라켓 편집: editMode, drag, pendingMatches 등 13개 상태 + 핸들러
