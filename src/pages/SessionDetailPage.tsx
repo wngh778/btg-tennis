@@ -1597,7 +1597,10 @@ export default function SessionDetailPage() {
                     if (!gA || !gB) return null;
                     const pA = attendingPlayers.filter(p => gA.memberIds.includes(p.id)).length;
                     const pB = attendingPlayers.filter(p => gB.memberIds.includes(p.id)).length;
-                    const c = Math.max(1, Math.floor(generateCourts / crossGroupPairs.length));
+                    // 코트 분배: 나머지는 앞 쌍부터 1개씩 추가 (실제 생성 로직과 동일)
+                    const baseC = Math.max(1, Math.floor(generateCourts / crossGroupPairs.length));
+                    const remC = generateCourts % crossGroupPairs.length;
+                    const c = baseC + (idx < remC ? 1 : 0);
                     const sameGroup = pair.groupAId === pair.groupBId;
                     const ok = !sameGroup && pA >= 2 && pB >= 2;
                     // 예상 라운드 수 및 경기 수 범위 계산

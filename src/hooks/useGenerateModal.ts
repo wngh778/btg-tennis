@@ -238,11 +238,16 @@ export function useGenerateModal({
     const existingInternalMatches = matches.filter(m => m.groupId && involvedGroupIds.has(m.groupId));
     for (const m of existingInternalMatches) await deleteMatch(m.id);
 
-    // 각 대결 쌍에 코트 균등 분배 (최소 1코트)
-    const courtsPerPair = Math.max(1, Math.floor(generateCourts / validPairs.length));
+    // 각 대결 쌍에 코트 분배: 나머지 코트는 앞 쌍부터 1개씩 추가 배분
+    // 예) 3코트 / 2쌍 → [2, 1] (floor=1, remainder=1 → 첫 쌍이 +1)
+    const baseCourtsPerPair = Math.max(1, Math.floor(generateCourts / validPairs.length));
+    const courtRemainder = generateCourts % validPairs.length;
 
     let courtOffset = 0;
-    for (const pair of validPairs) {
+    for (let pairIdx = 0; pairIdx < validPairs.length; pairIdx++) {
+      const pair = validPairs[pairIdx];
+      const pairCourts = baseCourtsPerPair + (pairIdx < courtRemainder ? 1 : 0);
+
       const gA = groups.find(g => g.id === pair.groupAId)!;
       const gB = groups.find(g => g.id === pair.groupBId)!;
       const playersA = attendingPlayers.filter(p => gA.memberIds.includes(p.id));
@@ -253,7 +258,7 @@ export function useGenerateModal({
       let pairRounds = generateRounds;
       if (generateMode === 'games') {
         const activeCourts = Math.min(
-          courtsPerPair,
+          pairCourts,
           Math.floor(playersA.length / 2),
           Math.floor(playersB.length / 2),
         );
@@ -271,14 +276,14 @@ export function useGenerateModal({
         sessionId: session.id,
         groupA: { id: gA.id, players: playersA },
         groupB: { id: gB.id, players: playersB },
-        courts: courtsPerPair,
+        courts: pairCourts,
         totalRounds: pairRounds,
         courtOffset,
         strategy: generateStrategy,
       });
 
       for (const m of generated) await insertMatch(m);
-      courtOffset += courtsPerPair;
+      courtOffset += pairCourts;
     }
 
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
