@@ -260,32 +260,26 @@ export function useBracketEdit({
 
   const handleAddMatch = (round: number) => {
     if (!session) return;
-    const playingInRound = new Set(
-      pendingMatches
-        .filter(m => m.round === round)
-        .flatMap(m => [m.team1.player1.id, m.team1.player2.id, m.team2.player1.id, m.team2.player2.id])
-    );
-    const bench = attendingPlayers.filter(p => !playingInRound.has(p.id));
-    if (bench.length < 4) {
-      alert('이 라운드에 추가할 벤치 선수가 4명 이상 필요합니다.');
-      return;
-    }
     pushUndo();
-    const [p1, p2, p3, p4] = bench.slice(0, 4);
-    const genders = [p1, p2, p3, p4].map(p => p.gender);
-    const matchType: MatchType = genders.every(g => g === 'male') ? 'male'
-      : genders.every(g => g === 'female') ? 'female'
-      : 'mixed';
+    // 빈 슬롯 placeholder — 선수는 직접 드래그로 배정
+    const ts = Date.now();
+    const emptySlot = (n: number): Player => ({
+      id: `placeholder_${ts}_${n}`,
+      name: '',
+      gender: 'male',
+      ntrp: 0,
+      type: 'member',
+    });
     const matchesInRound = pendingMatches.filter(m => m.round === round);
     const nextCourt = matchesInRound.length > 0 ? Math.max(...matchesInRound.map(m => m.court)) + 1 : 1;
     const newMatch: Match = {
-      id: `temp_${Date.now()}`,
+      id: `temp_${ts}`,
       sessionId: session.id,
       round,
       court: nextCourt,
-      matchType,
-      team1: { player1: p1, player2: p2 },
-      team2: { player1: p3, player2: p4 },
+      matchType: 'mixed',
+      team1: { player1: emptySlot(1), player2: emptySlot(2) },
+      team2: { player1: emptySlot(3), player2: emptySlot(4) },
       isCompleted: false,
     };
     const newMatches = [...pendingMatches, newMatch];

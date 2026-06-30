@@ -46,6 +46,19 @@ export function PlayerBadge({
     return <div className="text-xs text-slate-400 px-1.5 py-0.5">-</div>;
   }
 
+  // 빈 슬롯 — 경기 추가 시 자동배정 없이 생성된 드롭 대상
+  if (player.id.startsWith('placeholder_')) {
+    return (
+      <div
+        className="w-full rounded-lg px-2 py-1.5 border border-dashed border-slate-300 text-slate-400 text-xs text-center"
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={e => { e.stopPropagation(); onDrop?.(e); }}
+      >
+        여기에 드래그
+      </div>
+    );
+  }
+
   const content = (
     <div className="flex items-center gap-1.5 min-w-0">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
