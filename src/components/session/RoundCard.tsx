@@ -197,8 +197,8 @@ export function MatchCard({
           {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
         </div>
 
-        {/* Score */}
-        <div className="text-center px-1 flex flex-col items-center gap-1 shrink-0">
+        {/* Score — shrink-0 + w-fit: 콘텐츠 크기 유지, 절대 찌그러지지 않음 */}
+        <div className="text-center flex flex-col items-center gap-1 shrink-0 w-fit">
           {editing ? (
             <div className="flex items-center gap-1" onBlur={handleContainerBlur}>
               <input
