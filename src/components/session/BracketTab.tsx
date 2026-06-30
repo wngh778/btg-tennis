@@ -138,7 +138,17 @@ export function BracketTab({
         return [gA, gB].sort().join('|') === crossPairKey;
       });
     }
-    return arr.filter(m => m.groupId === selectedGroupId);
+    // groupId가 설정된 경우 → groupId로 필터
+    // groupId가 없는 경우(조간 대진 등) → 4명 전원이 해당 그룹 소속인지 선수 기반 필터
+    const group = groups.find(g => g.id === selectedGroupId);
+    if (!group) return arr;
+    return arr.filter(m => {
+      if (m.groupId) return m.groupId === selectedGroupId;
+      const players = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2];
+      return players
+        .filter(p => !p.id.startsWith('placeholder_'))
+        .every(p => group.memberIds.includes(p.id));
+    });
   };
 
   const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
@@ -159,8 +169,9 @@ export function BracketTab({
     return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
   })();
 
-  // 관리자: pendingRoundsCount 기반, 비관리자: 실제 matches 기준
-  const displayRounds = isAdminUser && pendingRoundsCount > 0
+  // 관리자 + 전체 보기: pendingRoundsCount 기반 (빈 라운드 포함)
+  // 그룹 탭 선택 시: 필터된 경기 기준 (해당 그룹 경기가 있는 라운드만)
+  const displayRounds = isAdminUser && pendingRoundsCount > 0 && !selectedGroupId
     ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
     : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
 
