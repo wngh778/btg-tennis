@@ -147,6 +147,8 @@ export function useGenerateModal({
       rounds: generateRounds,
       mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
     });
+    // 재생성 후 전체 보기로 초기화 (suffix 탭 등 필터가 남아있으면 일부 라운드만 표시됨)
+    setSelectedGroupId(null);
     load();
     changeTab('bracket');
   };
@@ -379,6 +381,7 @@ export function useGenerateModal({
     }
     await saveMatches(session.id, generated);
     await updateSession(session.id, { isGenerated: true, courts: 1, rounds: mondayRounds, mixedRounds: 0 });
+    setSelectedGroupId(null);
     load();
     changeTab('bracket');
   };
@@ -406,6 +409,7 @@ export function useGenerateModal({
       rounds: fixedPairRounds,
       mixedRounds: 0,
     });
+    setSelectedGroupId(null);
     load();
     changeTab('bracket');
   };
