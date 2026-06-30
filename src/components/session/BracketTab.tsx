@@ -164,8 +164,6 @@ export function BracketTab({
     ? Array.from({ length: pendingRoundsCount }, (_, i) => i + 1)
     : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
 
-  const hasInternalMatches = matches.some(m => m.groupId);
-  const showInternalTabs = hasInternalMatches;
 
   return (
     <div className="space-y-3">
@@ -256,8 +254,8 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 — 조 내부 경기만 표시 (조간 대진 탭 제외) */}
-      {session.gameMode === 'group' && showInternalTabs && (
+      {/* 그룹 모드 필터 탭 — [전체] [A군 대진] [B군 대진] */}
+      {session.gameMode === 'group' && groups.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
@@ -271,7 +269,7 @@ export function BracketTab({
               onClick={() => setSelectedGroupId(g.id)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
             >
-              {g.name}
+              {g.name} 대진
             </button>
           ))}
         </div>
