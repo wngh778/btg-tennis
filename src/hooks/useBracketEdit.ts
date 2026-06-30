@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { updateMatch, insertMatch, deleteMatch, updateSession } from '../lib/database';
 import type { Match, Player, Session, MatchType } from '../types';
 import type { SubstituteTarget } from '../components/session/RoundCard';
@@ -41,21 +41,32 @@ export function useBracketEdit({
   // ── Undo 스택 ────────────────────────────────────────────────────────────────
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
 
+  // autoSave 완료 후 load()로 가져온 matches에서 강제 재초기화 신호
+  // true이면 hasOverlap 여부와 무관하게 정렬된 DB 상태로 재초기화
+  const needsReloadRef = useRef(false);
+
   // matches가 바뀔 때 pendingMatches 자동 초기화
   // - matches가 비어있으면 무조건 초기화 (대진 초기화 / 첫 로드)
-  // - pendingMatches가 비어있으면 초기화 (최초 로드 또는 자동저장 후 리셋)
+  // - pendingMatches가 비어있으면 초기화 (최초 로드)
   // - pendingMatches의 경기들이 새 matches에 하나도 없으면 초기화 (재생성으로 완전 교체)
-  // - pendingMatches에 새 matches의 경기가 있으면 유지 (편집 중 보존)
+  // - needsReloadRef=true이면 autoSave 완료 후 강제 재초기화 (temp ID→실제 ID 반영)
+  // - pendingMatches에 새 matches의 경기가 있고 reload 불필요하면 유지 (편집 중 보존)
   useEffect(() => {
     if (matches.length === 0) {
       setPendingMatches([]);
       setPendingRoundsCount(0);
+      needsReloadRef.current = false;
       return;
     }
+    // DB 데이터는 항상 round → court 순으로 정렬해 일관된 순서 보장
+    const sorted: Match[] = [...matches].sort((a, b) =>
+      a.round !== b.round ? a.round - b.round : a.court - b.court
+    );
     const newMatchIds = new Set(matches.map(m => m.id));
     const hasOverlap = pendingMatches.some(m => newMatchIds.has(m.id));
-    if (pendingMatches.length === 0 || !hasOverlap) {
-      const copied: Match[] = JSON.parse(JSON.stringify(matches));
+    if (pendingMatches.length === 0 || !hasOverlap || needsReloadRef.current) {
+      needsReloadRef.current = false;
+      const copied: Match[] = JSON.parse(JSON.stringify(sorted));
       setPendingMatches(copied);
       const maxRound = Math.max(...copied.map(m => m.round));
       setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
@@ -142,9 +153,10 @@ export function useBracketEdit({
         await updateSession(session.id, { rounds: newRoundsCount });
       }
 
-      // pendingMatches 초기화 → useEffect가 load() 완료 후 새 matches로 재초기화
-      setPendingMatches([]);
+      // pendingMatches를 비우지 않고 유지 → 빈 화면 flicker 방지
+      // needsReloadRef=true로 설정 후 load() → useEffect에서 정렬된 DB 상태로 재초기화
       setDeletedMatchIds(new Set());
+      needsReloadRef.current = true;
       load();
     } finally {
       setSaving(false);
@@ -233,9 +245,31 @@ export function useBracketEdit({
 
   const handleDeleteMatch = (matchId: string) => {
     pushUndo();
-    const newMatches = pendingMatches.filter(m => m.id !== matchId);
+    const deletedMatch = pendingMatches.find(m => m.id === matchId);
+    const affectedRound = deletedMatch?.round;
     const newDeletedIds = new Set(deletedMatchIds);
     if (!matchId.startsWith('temp_')) newDeletedIds.add(matchId);
+
+    const filtered = pendingMatches.filter(m => m.id !== matchId);
+
+    // 같은 라운드 내 코트 번호 재정렬 — 삭제 후 번호 구멍 방지
+    // 현재 court 값 기준으로 정렬 후 1부터 재번호 부여
+    let newMatches: Match[];
+    if (affectedRound !== undefined) {
+      const courtMap = new Map(
+        filtered
+          .filter(m => m.round === affectedRound)
+          .sort((a, b) => a.court - b.court)
+          .map((m, i) => [m.id, i + 1])
+      );
+      newMatches = filtered.map(m => {
+        const newCourt = courtMap.get(m.id);
+        return newCourt !== undefined ? { ...m, court: newCourt } : m;
+      });
+    } else {
+      newMatches = filtered;
+    }
+
     setPendingMatches(newMatches);
     setDeletedMatchIds(newDeletedIds);
     autoSave(newMatches, newDeletedIds, pendingRoundsCount);
