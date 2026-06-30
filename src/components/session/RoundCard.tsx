@@ -47,9 +47,9 @@ export function PlayerBadge({
   }
 
   const content = (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 min-w-0">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-      <span className="text-sm font-medium text-slate-800">{player.name}</span>
+      <span className="text-sm font-medium text-slate-800 break-words min-w-0">{player.name}</span>
       {player.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
@@ -198,7 +198,7 @@ export function MatchCard({
         </div>
 
         {/* Score */}
-        <div className="text-center px-1 flex flex-col items-center gap-1">
+        <div className="text-center px-1 flex flex-col items-center gap-1 shrink-0">
           {editing ? (
             <div className="flex items-center gap-1" onBlur={handleContainerBlur}>
               <input
