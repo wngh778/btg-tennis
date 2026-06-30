@@ -138,17 +138,8 @@ export function BracketTab({
         return [gA, gB].sort().join('|') === crossPairKey;
       });
     }
-    // groupId가 설정된 경우 → groupId로 필터
-    // groupId가 없는 경우(조간 대진 등) → 4명 전원이 해당 그룹 소속인지 선수 기반 필터
-    const group = groups.find(g => g.id === selectedGroupId);
-    if (!group) return arr;
-    return arr.filter(m => {
-      if (m.groupId) return m.groupId === selectedGroupId;
-      const players = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2];
-      return players
-        .filter(p => !p.id.startsWith('placeholder_'))
-        .every(p => group.memberIds.includes(p.id));
-    });
+    // 그룹 탭: groupId 기준 필터
+    return arr.filter(m => m.groupId === selectedGroupId);
   };
 
   const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
@@ -265,8 +256,8 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 — [전체] [A군 대진] [B군 대진] */}
-      {session.gameMode === 'group' && groups.length > 0 && (
+      {/* 그룹 모드 필터 탭 — 조 내부 경기가 있을 때만 표시 */}
+      {session.gameMode === 'group' && matches.some(m => m.groupId) && !matches.some(m => !m.groupId) && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
