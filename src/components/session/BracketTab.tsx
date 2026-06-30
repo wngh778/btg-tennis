@@ -41,7 +41,6 @@ interface BracketTabProps {
   editMode: boolean;
   saving: boolean;
   canUndo: boolean;
-  crossPairKeys: string[];
   playerGroupMap: Map<string, string>;
   removedFromBracket: Player[];
   addedToBracket: Player[];
@@ -91,7 +90,6 @@ export function BracketTab({
   editMode,
   saving,
   canUndo,
-  crossPairKeys,
   playerGroupMap,
   removedFromBracket,
   addedToBracket,
@@ -167,9 +165,7 @@ export function BracketTab({
     : Array.from(new Set(filteredSource.map(m => m.round))).sort((a, b) => a - b);
 
   const hasInternalMatches = matches.some(m => m.groupId);
-  const hasCrossMatches = crossPairKeys.length > 0;
-  const showCrossTabs = hasCrossMatches;
-  const showInternalTabs = hasInternalMatches && !hasCrossMatches;
+  const showInternalTabs = hasInternalMatches;
 
   return (
     <div className="space-y-3">
@@ -260,8 +256,8 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 */}
-      {session.gameMode === 'group' && (
+      {/* 그룹 모드 필터 탭 — 조 내부 경기만 표시 (조간 대진 탭 제외) */}
+      {session.gameMode === 'group' && showInternalTabs && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
@@ -269,7 +265,7 @@ export function BracketTab({
           >
             전체
           </button>
-          {showInternalTabs && groups.map(g => (
+          {groups.map(g => (
             <button
               key={g.id}
               onClick={() => setSelectedGroupId(g.id)}
@@ -278,27 +274,6 @@ export function BracketTab({
               {g.name}
             </button>
           ))}
-          {showCrossTabs && crossPairKeys.map(pairKey => {
-            const [idA, idB] = pairKey.split('|');
-            const gA = groups.find(g => g.id === idA);
-            const gB = groups.find(g => g.id === idB);
-            if (!gA || !gB) return null;
-            const partsA = gA.name.trim().split(/\s+/);
-            const partsB = gB.name.trim().split(/\s+/);
-            const suffA = partsA[partsA.length - 1];
-            const suffB = partsB[partsB.length - 1];
-            const label = suffA === suffB ? `${suffA} 대진` : `${gA.name} vs ${gB.name}`;
-            const selKey = `cross_${pairKey}`;
-            return (
-              <button
-                key={selKey}
-                onClick={() => setSelectedGroupId(selKey)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === selKey ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
-              >
-                {label}
-              </button>
-            );
-          })}
         </div>
       )}
 

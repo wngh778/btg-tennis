@@ -336,14 +336,6 @@ export default function SessionDetailPage() {
   for (const g of groups) {
     for (const memberId of g.memberIds) playerGroupMap.set(memberId, g.id);
   }
-  const crossPairKeysSet = new Set<string>();
-  for (const m of matches) {
-    if (m.groupId) continue;
-    const gA = playerGroupMap.get(m.team1.player1.id);
-    const gB = playerGroupMap.get(m.team2.player1.id);
-    if (gA && gB) crossPairKeysSet.add([gA, gB].sort().join('|'));
-  }
-  const crossPairKeys = [...crossPairKeysSet].sort();
 
   // ── 대진표 vs 참석 불일치 감지 ───────────────────────────────────────────
   const bracketPlayerIds = new Set(
@@ -580,7 +572,6 @@ export default function SessionDetailPage() {
             editMode={editMode}
             saving={saving}
             canUndo={canUndo}
-            crossPairKeys={crossPairKeys}
             playerGroupMap={playerGroupMap}
             removedFromBracket={removedFromBracket}
             addedToBracket={addedToBracket}
