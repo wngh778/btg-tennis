@@ -41,7 +41,6 @@ interface BracketTabProps {
   editMode: boolean;
   saving: boolean;
   canUndo: boolean;
-  crossPairKeys: string[];
   playerGroupMap: Map<string, string>;
   removedFromBracket: Player[];
   addedToBracket: Player[];
@@ -91,7 +90,6 @@ export function BracketTab({
   editMode,
   saving,
   canUndo,
-  crossPairKeys,
   playerGroupMap,
   removedFromBracket,
   addedToBracket,
@@ -125,19 +123,43 @@ export function BracketTab({
   onBenchDragStart,
   onPlayerClick,
 }: BracketTabProps) {
-  // cross_xxx: 조간 대진 쌍 필터, group.id: 조 내부 필터, null: 전체
-  const isCrossFilter = typeof selectedGroupId === 'string' && selectedGroupId.startsWith('cross_');
-  const crossPairKey = isCrossFilter ? selectedGroupId.slice(6) : null;
+  // ── suffix 기반 탭 계산 ─────────────────────────────────────────────────
+  // 그룹 이름의 마지막 단어(suffix)로 묶음: "YB A군" → "A군", "OB A군" → "A군"
+  const suffixMap = new Map<string, string[]>(); // suffix → groupId[]
+  for (const g of groups) {
+    const parts = g.name.trim().split(/\s+/);
+    const suffix = parts[parts.length - 1];
+    if (!suffixMap.has(suffix)) suffixMap.set(suffix, []);
+    suffixMap.get(suffix)!.push(g.id);
+  }
+  // suffix 탭은 2개 이상의 그룹이 묶인 경우만 표시 (실제 조간 대진)
+  const suffixTabs = [...suffixMap.entries()].filter(([, ids]) => ids.length >= 2);
+
+  // 선택된 suffix 탭 키 (e.g. "suffix_A군" → targetSuffix = "A군")
+  const targetSuffix = typeof selectedGroupId === 'string' && selectedGroupId.startsWith('suffix_')
+    ? selectedGroupId.slice(7)
+    : null;
+
+  // 그룹 id로 suffix 조회
+  const getGroupSuffix = (groupId: string): string | null => {
+    const g = groups.find(x => x.id === groupId);
+    if (!g) return null;
+    const parts = g.name.trim().split(/\s+/);
+    return parts[parts.length - 1];
+  };
 
   const filterByPair = (arr: Match[]): Match[] => {
     if (!selectedGroupId || session.gameMode !== 'group') return arr;
-    if (isCrossFilter) {
+    if (targetSuffix) {
+      // suffix 탭: 비-placeholder 선수 전원이 해당 suffix 그룹 소속인 경기만
       return arr.filter(m => {
-        if (m.groupId) return false;
-        const gA = playerGroupMap.get(m.team1.player1.id);
-        const gB = playerGroupMap.get(m.team2.player1.id);
-        if (!gA || !gB) return false;
-        return [gA, gB].sort().join('|') === crossPairKey;
+        const players = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]
+          .filter(p => p && p.id !== 'placeholder' && p.id !== '');
+        if (players.length === 0) return false;
+        return players.every(p => {
+          const gid = playerGroupMap.get(p.id);
+          return gid !== undefined && getGroupSuffix(gid) === targetSuffix;
+        });
       });
     }
     // 그룹 내부 탭: groupId로 필터
@@ -151,12 +173,12 @@ export function BracketTab({
   // 휴식 인원: 해당 필터 범위 내 선수만 표시
   const roundAttendingPlayers = (() => {
     if (!selectedGroupId || session.gameMode !== 'group') return attendingPlayers;
-    if (isCrossFilter) {
-      const [idA, idB] = (crossPairKey ?? '').split('|');
-      const gA = groups.find(g => g.id === idA);
-      const gB = groups.find(g => g.id === idB);
-      if (!gA || !gB) return attendingPlayers;
-      return attendingPlayers.filter(p => gA.memberIds.includes(p.id) || gB.memberIds.includes(p.id));
+    if (targetSuffix) {
+      // suffix 탭: 해당 suffix 그룹에 속한 선수만
+      return attendingPlayers.filter(p => {
+        const gid = playerGroupMap.get(p.id);
+        return gid !== undefined && getGroupSuffix(gid) === targetSuffix;
+      });
     }
     const group = groups.find(g => g.id === selectedGroupId);
     return group ? attendingPlayers.filter(p => group.memberIds.includes(p.id)) : attendingPlayers;
@@ -259,10 +281,10 @@ export function BracketTab({
       )}
 
       {/* 그룹 모드 필터 탭
-          - 조간 대진이 있으면: [전체] + [A군 대진] [B군 대진] (쌍별 탭)
-          - 조 내부 경기만 있으면: [전체] + [A군] [B군] (그룹별 탭)
+          - suffix 쌍이 있으면: [전체] + [A군 대진] [B군 대진] (suffix 기반 쌍 탭)
+          - suffix 쌍이 없으면: [전체] + 개별 그룹 탭
       */}
-      {session.gameMode === 'group' && (crossPairKeys.length > 0 || matches.some(m => m.groupId)) && (
+      {session.gameMode === 'group' && groups.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
@@ -270,38 +292,29 @@ export function BracketTab({
           >
             전체
           </button>
-          {/* 조간 대진 쌍 탭: cross_xxx 키로 필터 */}
-          {crossPairKeys.length > 0 && crossPairKeys.map(pairKey => {
-            const [idA, idB] = pairKey.split('|');
-            const gA = groups.find(g => g.id === idA);
-            const gB = groups.find(g => g.id === idB);
-            if (!gA || !gB) return null;
-            const partsA = gA.name.trim().split(/\s+/);
-            const partsB = gB.name.trim().split(/\s+/);
-            const suffA = partsA[partsA.length - 1];
-            const suffB = partsB[partsB.length - 1];
-            const label = suffA === suffB ? `${suffA} 대진` : `${gA.name} vs ${gB.name}`;
-            const selKey = `cross_${pairKey}`;
-            return (
-              <button
-                key={selKey}
-                onClick={() => setSelectedGroupId(selKey)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === selKey ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
-              >
-                {label}
-              </button>
-            );
-          })}
-          {/* 조 내부 경기 탭: 조간 대진이 없을 때만 표시 */}
-          {crossPairKeys.length === 0 && groups.map(g => (
-            <button
-              key={g.id}
-              onClick={() => setSelectedGroupId(g.id)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
-            >
-              {g.name} 대진
-            </button>
-          ))}
+          {suffixTabs.length > 0
+            ? suffixTabs.map(([suffix]) => {
+                const selKey = `suffix_${suffix}`;
+                return (
+                  <button
+                    key={selKey}
+                    onClick={() => setSelectedGroupId(selKey)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === selKey ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
+                  >
+                    {suffix} 대진
+                  </button>
+                );
+              })
+            : groups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => setSelectedGroupId(g.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === g.id ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {g.name} 대진
+                </button>
+              ))
+          }
         </div>
       )}
 
