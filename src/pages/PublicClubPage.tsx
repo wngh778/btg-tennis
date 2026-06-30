@@ -13,7 +13,7 @@ function PublicMatchCard({ match }: { match: Match }) {
   const renderPlayer = (p: Player) => (
     <div className="flex items-center gap-1.5">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${p.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-      <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
+      <span className="text-sm font-medium text-slate-800">{p.name}</span>
       {p.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
@@ -155,11 +155,11 @@ function SimpleSessionView({ session, matches, groups, clubName, clubColor }: {
                 </div>
                 {groupMatches.map(m => (
                   <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                    <span className="text-slate-700 truncate text-right pr-1">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
+                    <span className="text-slate-700 text-right pr-1">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
                     <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
                       {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
                     </span>
-                    <span className="text-slate-700 truncate pl-1">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
+                    <span className="text-slate-700 pl-1">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
                   </div>
                 ))}
               </div>
@@ -179,11 +179,11 @@ function SimpleSessionView({ session, matches, groups, clubName, clubColor }: {
                   </div>
                   {roundMatches.map(m => (
                     <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                      <span className="text-slate-700 truncate text-right pr-1">{m.team1.player1.name} {m.team1.player2.name}</span>
+                      <span className="text-slate-700 text-right pr-1">{m.team1.player1.name} {m.team1.player2.name}</span>
                       <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
                         {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
                       </span>
-                      <span className="text-slate-700 truncate pl-1">{m.team2.player1.name} {m.team2.player2.name}</span>
+                      <span className="text-slate-700 pl-1">{m.team2.player1.name} {m.team2.player2.name}</span>
                     </div>
                   ))}
                 </div>

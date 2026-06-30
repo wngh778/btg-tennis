@@ -49,7 +49,7 @@ export function PlayerBadge({
   const content = (
     <div className="flex items-center gap-1.5">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-      <span className="text-sm font-medium text-slate-800 truncate">{player.name}</span>
+      <span className="text-sm font-medium text-slate-800">{player.name}</span>
       {player.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
