@@ -41,6 +41,7 @@ interface BracketTabProps {
   editMode: boolean;
   saving: boolean;
   canUndo: boolean;
+  crossPairKeys: string[];
   playerGroupMap: Map<string, string>;
   removedFromBracket: Player[];
   addedToBracket: Player[];
@@ -90,6 +91,7 @@ export function BracketTab({
   editMode,
   saving,
   canUndo,
+  crossPairKeys,
   playerGroupMap,
   removedFromBracket,
   addedToBracket,
@@ -138,19 +140,8 @@ export function BracketTab({
         return [gA, gB].sort().join('|') === crossPairKey;
       });
     }
-    // 그룹 탭 필터
-    // 1순위: groupId가 있으면 groupId로 직접 필터
-    // 2순위: groupId가 없으면 선수 소속으로 판단 (실제 선수 과반수가 해당 그룹이면 포함)
-    const group = groups.find(g => g.id === selectedGroupId);
-    if (!group) return arr;
-    return arr.filter(m => {
-      if (m.groupId) return m.groupId === selectedGroupId;
-      const players = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]
-        .filter(p => !p.id.startsWith('placeholder_'));
-      if (players.length === 0) return false;
-      const inGroup = players.filter(p => group.memberIds.includes(p.id));
-      return inGroup.length > players.length / 2;
-    });
+    // 그룹 내부 탭: groupId로 필터
+    return arr.filter(m => m.groupId === selectedGroupId);
   };
 
   const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
@@ -267,8 +258,11 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 — 조가 편성되어 있으면 항상 표시 */}
-      {session.gameMode === 'group' && groups.length > 0 && matches.length > 0 && (
+      {/* 그룹 모드 필터 탭
+          - 조간 대진이 있으면: [전체] + [A군 대진] [B군 대진] (쌍별 탭)
+          - 조 내부 경기만 있으면: [전체] + [A군] [B군] (그룹별 탭)
+      */}
+      {session.gameMode === 'group' && (crossPairKeys.length > 0 || matches.some(m => m.groupId)) && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
@@ -276,7 +270,30 @@ export function BracketTab({
           >
             전체
           </button>
-          {groups.map(g => (
+          {/* 조간 대진 쌍 탭: cross_xxx 키로 필터 */}
+          {crossPairKeys.length > 0 && crossPairKeys.map(pairKey => {
+            const [idA, idB] = pairKey.split('|');
+            const gA = groups.find(g => g.id === idA);
+            const gB = groups.find(g => g.id === idB);
+            if (!gA || !gB) return null;
+            const partsA = gA.name.trim().split(/\s+/);
+            const partsB = gB.name.trim().split(/\s+/);
+            const suffA = partsA[partsA.length - 1];
+            const suffB = partsB[partsB.length - 1];
+            const label = suffA === suffB ? `${suffA} 대진` : `${gA.name} vs ${gB.name}`;
+            const selKey = `cross_${pairKey}`;
+            return (
+              <button
+                key={selKey}
+                onClick={() => setSelectedGroupId(selKey)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedGroupId === selKey ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}
+              >
+                {label}
+              </button>
+            );
+          })}
+          {/* 조 내부 경기 탭: 조간 대진이 없을 때만 표시 */}
+          {crossPairKeys.length === 0 && groups.map(g => (
             <button
               key={g.id}
               onClick={() => setSelectedGroupId(g.id)}

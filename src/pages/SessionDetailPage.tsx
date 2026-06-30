@@ -331,11 +331,21 @@ export default function SessionDetailPage() {
     setGroups(g);
   };
 
-  // ── 조간 대진 감지 ────────────────────────────────────────────────────────
+  // ── 조 편성 맵 + 조간 대진 쌍 ────────────────────────────────────────────
   const playerGroupMap = new Map<string, string>();
   for (const g of groups) {
     for (const memberId of g.memberIds) playerGroupMap.set(memberId, g.id);
   }
+  // crossPairKeys: 조간 대진 경기(groupId 없음)에서 서로 다른 조 쌍 추출
+  // 예: ["YB A군 id|OB A군 id", "YB B군 id|OB B군 id"] → 탭 레이블 "A군 대진", "B군 대진"
+  const crossPairKeysSet = new Set<string>();
+  for (const m of matches) {
+    if (m.groupId) continue;
+    const gA = playerGroupMap.get(m.team1.player1.id);
+    const gB = playerGroupMap.get(m.team2.player1.id);
+    if (gA && gB && gA !== gB) crossPairKeysSet.add([gA, gB].sort().join('|'));
+  }
+  const crossPairKeys = [...crossPairKeysSet].sort();
 
   // ── 대진표 vs 참석 불일치 감지 ───────────────────────────────────────────
   const bracketPlayerIds = new Set(
@@ -572,6 +582,7 @@ export default function SessionDetailPage() {
             editMode={editMode}
             saving={saving}
             canUndo={canUndo}
+            crossPairKeys={crossPairKeys}
             playerGroupMap={playerGroupMap}
             removedFromBracket={removedFromBracket}
             addedToBracket={addedToBracket}
