@@ -256,8 +256,8 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 — 조 내부 경기가 있을 때만 표시 */}
-      {session.gameMode === 'group' && matches.some(m => m.groupId) && !matches.some(m => !m.groupId) && (
+      {/* 그룹 모드 필터 탭 — groupId가 있는 경기가 하나라도 있으면 표시 */}
+      {session.gameMode === 'group' && matches.some(m => m.groupId) && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
