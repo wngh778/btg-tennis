@@ -2217,11 +2217,10 @@ export default function SessionDetailPage() {
             // 현재 생성된 경기 타입 감지
             const hasInternalMatches = matches.some(m => m.groupId);
             const hasCrossMatches = crossPairKeys.length > 0;
-            // 조 내부만 있으면 조 내부 탭만, 조간만 있으면 조간 탭만 표시
+            // 조간 대진이 있으면 조간 탭 우선 (내부 탭 숨김)
+            // 조 내부 대진만 있으면 내부 탭만 표시
+            const showCrossTabs = hasCrossMatches;
             const showInternalTabs = hasInternalMatches && !hasCrossMatches;
-            const showCrossTabs = hasCrossMatches && !hasInternalMatches;
-            // 둘 다 있거나 둘 다 없으면 모두 표시
-            const showAll = !showInternalTabs && !showCrossTabs;
             return (
             <div className="flex gap-2 flex-wrap">
               {/* 전체 보기 */}
@@ -2231,8 +2230,8 @@ export default function SessionDetailPage() {
               >
                 전체
               </button>
-              {/* 조 내부 대진 버튼 (조간 대진만 있을 때는 숨김) */}
-              {(showInternalTabs || showAll) && groups.map(g => (
+              {/* 조 내부 대진 버튼 (조간 대진 있을 때는 숨김) */}
+              {showInternalTabs && groups.map(g => (
                 <button
                   key={g.id}
                   onClick={() => setSelectedGroupId(g.id)}
@@ -2241,8 +2240,8 @@ export default function SessionDetailPage() {
                   {g.name}
                 </button>
               ))}
-              {/* 조간 대진 쌍 버튼 (조 내부 대진만 있을 때는 숨김) */}
-              {(showCrossTabs || showAll) && crossPairKeys.map(pairKey => {
+              {/* 조간 대진 쌍 버튼 */}
+              {showCrossTabs && crossPairKeys.map(pairKey => {
                 const [idA, idB] = pairKey.split('|');
                 const gA = groups.find(g => g.id === idA);
                 const gB = groups.find(g => g.id === idB);
