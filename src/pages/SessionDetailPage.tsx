@@ -103,11 +103,11 @@ export default function SessionDetailPage() {
   useEffect(() => { if (!authLoading) load(); }, [load, authLoading]);
 
   // 조별경기: 그룹 로드 후 내 그룹 자동 선택
-  // 단, 조간 대진만 있는 경우(groupId=null인 경기가 전부)에는 전체(null) 유지
+  // 단, 조간 대진이 하나라도 있으면(groupId=null 경기 존재) 전체(null) 유지
   useEffect(() => {
     if (groups.length > 0 && selectedGroupId === null && session?.gameMode === 'group') {
-      const hasCrossOnly = matches.length > 0 && matches.every(m => !m.groupId);
-      if (hasCrossOnly) return; // 조간 대진만 있으면 전체(null) 유지 → 바로 보임
+      const hasCrossMatches = matches.some(m => !m.groupId); // groupId 없는 경기 = 조간 대진
+      if (hasCrossMatches) return; // 조간 대진 있으면 전체(null) 유지 → 바로 보임
       const myMemberInEffect = appUser ? members.filter(m => m.isActive).find(m => m.name === appUser.username) ?? null : null;
       const myGroupInEffect = myMemberInEffect ? groups.find(g => g.memberIds.includes(myMemberInEffect.id)) ?? null : null;
       setSelectedGroupId(myGroupInEffect?.id ?? groups[0]?.id ?? null);

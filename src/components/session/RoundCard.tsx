@@ -197,10 +197,16 @@ export function MatchCard({
           {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
         </div>
 
-        {/* Score — shrink-0 + w-fit: 콘텐츠 크기 유지, 절대 찌그러지지 않음 */}
+        {/* Score — 클릭하면 바로 입력, blur 시 자동저장 */}
         <div className="text-center flex flex-col items-center gap-1 shrink-0 w-fit">
           {editing ? (
-            <div className="flex items-center gap-1" onBlur={handleContainerBlur}>
+            // 입력 중: 드래그 이벤트 차단, blur 시 자동저장
+            <div
+              className="flex items-center gap-1"
+              onBlur={handleContainerBlur}
+              onClick={e => e.stopPropagation()}
+              onDragStart={e => e.stopPropagation()}
+            >
               <input
                 value={score1}
                 onChange={e => {
@@ -227,8 +233,25 @@ export function MatchCard({
                 placeholder="0"
               />
             </div>
+          ) : canEditScore ? (
+            // 점수 입력 권한 있음: 영역 전체 클릭으로 바로 입력 시작 (편집 모드에서도 동작)
+            <div
+              onClick={e => { e.stopPropagation(); setEditing(true); }}
+              className="cursor-pointer flex flex-col items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/60 transition-colors"
+            >
+              {match.isCompleted ? (
+                <div className="flex items-center gap-1">
+                  <span className="text-lg font-bold text-slate-800">{match.score1}</span>
+                  <span className="text-xs text-slate-400 font-bold">:</span>
+                  <span className="text-lg font-bold text-slate-800">{match.score2}</span>
+                </div>
+              ) : (
+                <div className="text-green-500 text-xs font-semibold">탭하여<br/>입력</div>
+              )}
+            </div>
           ) : (
-            <>
+            // 점수 입력 권한 없음: 읽기 전용
+            <div className="flex flex-col items-center gap-1">
               {match.isCompleted ? (
                 <div className="flex items-center gap-1">
                   <span className="text-lg font-bold text-slate-800">{match.score1}</span>
@@ -238,19 +261,7 @@ export function MatchCard({
               ) : (
                 <div className="text-slate-300 text-sm">vs</div>
               )}
-              {canEditScore && !editMode && (
-                <button
-                  onClick={() => setEditing(true)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                    match.isCompleted
-                      ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                      : 'bg-green-500 text-white hover:bg-green-600 shadow-sm'
-                  }`}
-                >
-                  {match.isCompleted ? '수정' : '입력'}
-                </button>
-              )}
-            </>
+            </div>
           )}
         </div>
 
