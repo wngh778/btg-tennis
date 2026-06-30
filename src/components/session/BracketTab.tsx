@@ -138,8 +138,19 @@ export function BracketTab({
         return [gA, gB].sort().join('|') === crossPairKey;
       });
     }
-    // 그룹 탭: groupId 기준 필터
-    return arr.filter(m => m.groupId === selectedGroupId);
+    // 그룹 탭 필터
+    // 1순위: groupId가 있으면 groupId로 직접 필터
+    // 2순위: groupId가 없으면 선수 소속으로 판단 (실제 선수 과반수가 해당 그룹이면 포함)
+    const group = groups.find(g => g.id === selectedGroupId);
+    if (!group) return arr;
+    return arr.filter(m => {
+      if (m.groupId) return m.groupId === selectedGroupId;
+      const players = [m.team1.player1, m.team1.player2, m.team2.player1, m.team2.player2]
+        .filter(p => !p.id.startsWith('placeholder_'));
+      if (players.length === 0) return false;
+      const inGroup = players.filter(p => group.memberIds.includes(p.id));
+      return inGroup.length > players.length / 2;
+    });
   };
 
   const bracketSource = pendingMatches.length > 0 ? pendingMatches : matches;
@@ -256,8 +267,8 @@ export function BracketTab({
         </div>
       )}
 
-      {/* 그룹 모드 필터 탭 — groupId가 있는 경기가 하나라도 있으면 표시 */}
-      {session.gameMode === 'group' && matches.some(m => m.groupId) && (
+      {/* 그룹 모드 필터 탭 — 조가 편성되어 있으면 항상 표시 */}
+      {session.gameMode === 'group' && groups.length > 0 && matches.length > 0 && (
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setSelectedGroupId(null)}
