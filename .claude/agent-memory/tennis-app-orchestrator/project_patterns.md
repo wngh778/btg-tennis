@@ -46,6 +46,15 @@ Layout.tsx의 visibilitychange → window.location.reload() 로 인해 탭 state
 **Why:** root tsconfig.json은 project references 방식으로 구성되어 `files: []`가 설정됨.
 **How to apply:** CI/수동 검사 모두 `--project tsconfig.app.json` 플래그 필수.
 
+## tsx/esbuild __name() 이슈 — Playwright page.evaluate() (블로그 프로젝트)
+
+tsx가 const 함수 선언을 `__name()` 래퍼로 변환 → 브라우저에서 `ReferenceError: __name is not defined`.
+**해결**: page.evaluate() 내부에서 const 함수 선언 금지. page.fill(), locator().pressSequentially() 사용.
+evaluate 불가피 시: 이름 없는 인라인 표현식만 사용.
+
+**Why:** 2026-06-08 블로그 자동화 프로젝트에서 발견.
+**How to apply:** Playwright + tsx 조합 시 evaluate() 내 함수 정의 패턴 주의.
+
 ## 커스텀 훅 분리 패턴 (SessionDetailPage)
 
 훅을 분리할 때 `load` 콜백은 훅 호출 **이전**에 정의해야 함 (const는 TDZ 적용).

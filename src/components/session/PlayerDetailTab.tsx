@@ -66,20 +66,21 @@ export function PlayerDetailTab({ attendingPlayers, matches, showNtrp }: { atten
 
       {/* Per player list */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center flex-1">
+        {/* 헤더: 데이터 행과 동일한 grid로 열 정렬 */}
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold text-slate-500">이름</span>
-            <span className="text-xs font-semibold text-blue-500 w-10 text-center">남복</span>
-            <span className="text-xs font-semibold text-purple-500 w-10 text-center">혼복</span>
-            <span className="text-xs font-semibold text-pink-500 w-10 text-center">여복</span>
-            <span className="text-xs font-semibold text-slate-600 w-12 text-center">합계</span>
+            <button
+              onClick={() => setShowGuests(!showGuests)}
+              className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-500 hover:bg-slate-100 transition-colors"
+            >
+              {showGuests ? '게스트 숨기기' : '게스트 포함'}
+            </button>
           </div>
-          <button
-            onClick={() => setShowGuests(!showGuests)}
-            className="ml-3 text-xs px-2 py-1 rounded border border-slate-300 text-slate-500 hover:bg-slate-100 transition-colors shrink-0"
-          >
-            {showGuests ? '게스트 숨기기' : '게스트 포함'}
-          </button>
+          <span className="text-xs font-semibold text-blue-500 w-10 text-center">남복</span>
+          <span className="text-xs font-semibold text-purple-500 w-10 text-center">혼복</span>
+          <span className="text-xs font-semibold text-pink-500 w-10 text-center">여복</span>
+          <span className="text-xs font-semibold text-slate-600 w-12 text-center">합계</span>
         </div>
         <div className="divide-y divide-slate-100">
           {displayPlayers.map(p => {

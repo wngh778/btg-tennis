@@ -39,13 +39,11 @@ export function useBracketEdit({
   const [dragOverRound, setDragOverRound] = useState<number | null>(null);
 
   // ── Undo 스택 ────────────────────────────────────────────────────────────────
-  // NOTE: 이 훅은 useCallback 없이 매 렌더에 재생성되므로
-  // 핸들러 내 pendingMatches/pendingRoundsCount는 항상 최신 렌더 값을 참조함.
   const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
 
   // matches가 바뀔 때 pendingMatches 자동 초기화
   // - matches가 비어있으면 무조건 초기화 (대진 초기화 / 첫 로드)
-  // - pendingMatches가 비어있으면 초기화 (최초 로드)
+  // - pendingMatches가 비어있으면 초기화 (최초 로드 또는 자동저장 후 리셋)
   // - pendingMatches의 경기들이 새 matches에 하나도 없으면 초기화 (재생성으로 완전 교체)
   // - pendingMatches에 새 matches의 경기가 있으면 유지 (편집 중 보존)
   useEffect(() => {
@@ -73,15 +71,6 @@ export function useBracketEdit({
     ]);
   };
 
-  const handleUndo = () => {
-    if (undoStack.length === 0) return;
-    const last = undoStack[undoStack.length - 1];
-    setPendingMatches(last.matches);
-    setPendingRoundsCount(last.roundsCount);
-    setSubstituteTarget(null);
-    setUndoStack(prev => prev.slice(0, -1));
-  };
-
   const clearUndo = () => setUndoStack([]);
 
   // ── 편집 관련 ───────────────────────────────────────────────────────
@@ -97,15 +86,83 @@ export function useBracketEdit({
     clearUndo();
   };
 
-  /** 취소: 변경사항 버리고 저장된 matches로 되돌림 */
-  const handleEditCancel = () => {
-    const copied: Match[] = JSON.parse(JSON.stringify(matches));
-    setPendingMatches(copied);
-    const maxRound = copied.length > 0 ? Math.max(...copied.map(m => m.round)) : session?.rounds ?? 0;
-    setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
+  // ── 자동 저장 ─────────────────────────────────────────────────────────────────
+
+  /**
+   * 각 편집 조작 직후 호출하는 자동저장.
+   * newMatches, newDeletedIds, newRoundsCount는 setState 직전에 계산한 값을
+   * 그대로 넘겨야 함 (setState는 비동기라 직후 state 참조 불가).
+   *
+   * 저장 완료 후 load()를 호출해 DB 상태를 matches로 재동기화.
+   * pendingMatches를 빈 배열로 비워두면 useEffect가 새 matches로 재초기화함.
+   */
+  const autoSave = async (
+    newMatches: Match[],
+    newDeletedIds: Set<string>,
+    newRoundsCount: number,
+  ) => {
+    if (!session) return;
+    setSaving(true);
+    try {
+      const currentDbIds = new Set(matches.map(m => m.id));
+
+      for (const pm of newMatches) {
+        // temp_ 접두어이거나, DB에 없는 경기(undo로 복구된 삭제된 경기) → 신규 삽입
+        const needsInsert = pm.id.startsWith('temp_') || !currentDbIds.has(pm.id);
+        if (needsInsert) {
+          const { id: _id, ...matchData } = pm;
+          await insertMatch(matchData);
+        } else {
+          // 기존 경기 — 변경된 경우만 업데이트
+          const original = matches.find(m => m.id === pm.id);
+          if (!original) continue;
+          const changed =
+            JSON.stringify(original.team1) !== JSON.stringify(pm.team1) ||
+            JSON.stringify(original.team2) !== JSON.stringify(pm.team2) ||
+            original.round !== pm.round ||
+            original.court !== pm.court ||
+            original.matchType !== pm.matchType;
+          if (changed) {
+            await updateMatch(pm.id, {
+              team1: pm.team1,
+              team2: pm.team2,
+              round: pm.round,
+              court: pm.court,
+              matchType: pm.matchType,
+            });
+          }
+        }
+      }
+
+      for (const id of newDeletedIds) {
+        await deleteMatch(id);
+      }
+
+      if (newRoundsCount !== session.rounds) {
+        await updateSession(session.id, { rounds: newRoundsCount });
+      }
+
+      // pendingMatches 초기화 → useEffect가 load() 완료 후 새 matches로 재초기화
+      setPendingMatches([]);
+      setDeletedMatchIds(new Set());
+      load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Undo ─────────────────────────────────────────────────────────────────────
+
+  const handleUndo = () => {
+    if (undoStack.length === 0 || saving) return;
+    const last = undoStack[undoStack.length - 1];
+    setPendingMatches(last.matches);
+    setPendingRoundsCount(last.roundsCount);
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
-    clearUndo();
+    setUndoStack(prev => prev.slice(0, -1));
+    // undo 상태도 DB에 동기화 (삭제된 경기는 needsInsert 로직으로 재삽입)
+    autoSave(last.matches, new Set(), last.roundsCount);
   };
 
   // ── 라운드 수 조정 ────────────────────────────────────────────────────────────
@@ -114,57 +171,17 @@ export function useBracketEdit({
     const newCount = pendingRoundsCount + delta;
     if (newCount < 1) return;
     pushUndo();
+    const newDeletedIds = new Set(deletedMatchIds);
+    let newMatches = pendingMatches;
     if (delta < 0) {
-      setPendingMatches(prev => prev.filter(m => m.round <= newCount));
+      const toDelete = pendingMatches.filter(m => m.round > newCount);
+      toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m => newDeletedIds.add(m.id));
+      newMatches = pendingMatches.filter(m => m.round <= newCount);
     }
+    setPendingMatches(newMatches);
+    setDeletedMatchIds(newDeletedIds);
     setPendingRoundsCount(newCount);
-  };
-
-  // ── 저장 ─────────────────────────────────────────────────────────────────────
-
-  const handleEditSave = async () => {
-    if (!session) return;
-    setSaving(true);
-    try {
-      for (const pm of pendingMatches) {
-        if (pm.id.startsWith('temp_')) continue;
-        const original = matches.find(m => m.id === pm.id);
-        if (!original) continue;
-        const changed =
-          JSON.stringify(original.team1) !== JSON.stringify(pm.team1) ||
-          JSON.stringify(original.team2) !== JSON.stringify(pm.team2) ||
-          original.round !== pm.round ||
-          original.court !== pm.court ||
-          original.matchType !== pm.matchType;
-        if (changed) {
-          await updateMatch(pm.id, {
-            team1: pm.team1,
-            team2: pm.team2,
-            round: pm.round,
-            court: pm.court,
-            matchType: pm.matchType,
-          });
-        }
-      }
-      for (const nm of pendingMatches.filter(m => m.id.startsWith('temp_'))) {
-        const { id: _id, ...matchData } = nm;
-        await insertMatch(matchData);
-      }
-      for (const id of deletedMatchIds) {
-        await deleteMatch(id);
-      }
-      if (pendingRoundsCount !== session.rounds) {
-        await updateSession(session.id, { rounds: pendingRoundsCount });
-      }
-      setPendingMatches([]); // useEffect가 load() 완료 후 matches에서 재초기화
-      setPendingRoundsCount(0);
-      setSubstituteTarget(null);
-      setDeletedMatchIds(new Set());
-      clearUndo();
-      load();
-    } finally {
-      setSaving(false);
-    }
+    autoSave(newMatches, newDeletedIds, newCount);
   };
 
   // ── 자동 배정 ─────────────────────────────────────────────────────────────────
@@ -207,31 +224,36 @@ export function useBracketEdit({
       [p1, p2, p3, p4].forEach(p => usedIds.add(p.id));
     }
     if (newMatches.length === 0) { alert('배정할 인원이 부족합니다.'); return; }
-    setPendingMatches(prev => [...prev, ...newMatches]);
+    const allNewMatches = [...pendingMatches, ...newMatches];
+    setPendingMatches(allNewMatches);
+    autoSave(allNewMatches, deletedMatchIds, pendingRoundsCount);
   };
 
   // ── 경기/라운드 삭제 ──────────────────────────────────────────────────────────
 
   const handleDeleteMatch = (matchId: string) => {
     pushUndo();
-    setPendingMatches(prev => prev.filter(m => m.id !== matchId));
-    if (!matchId.startsWith('temp_')) {
-      setDeletedMatchIds(prev => new Set([...prev, matchId]));
-    }
+    const newMatches = pendingMatches.filter(m => m.id !== matchId);
+    const newDeletedIds = new Set(deletedMatchIds);
+    if (!matchId.startsWith('temp_')) newDeletedIds.add(matchId);
+    setPendingMatches(newMatches);
+    setDeletedMatchIds(newDeletedIds);
+    autoSave(newMatches, newDeletedIds, pendingRoundsCount);
   };
 
   const handleDeleteRound = (round: number) => {
     pushUndo();
     const toDelete = pendingMatches.filter(m => m.round === round);
-    toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m =>
-      setDeletedMatchIds(prev => new Set([...prev, m.id]))
-    );
-    setPendingMatches(prev =>
-      prev
-        .filter(m => m.round !== round)
-        .map(m => m.round > round ? { ...m, round: m.round - 1 } : m)
-    );
-    setPendingRoundsCount(prev => Math.max(1, prev - 1));
+    const newDeletedIds = new Set(deletedMatchIds);
+    toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m => newDeletedIds.add(m.id));
+    const newMatches = pendingMatches
+      .filter(m => m.round !== round)
+      .map(m => m.round > round ? { ...m, round: m.round - 1 } : m);
+    const newCount = Math.max(1, pendingRoundsCount - 1);
+    setPendingMatches(newMatches);
+    setDeletedMatchIds(newDeletedIds);
+    setPendingRoundsCount(newCount);
+    autoSave(newMatches, newDeletedIds, newCount);
   };
 
   // ── 경기 수동 추가 ────────────────────────────────────────────────────────────
@@ -266,16 +288,18 @@ export function useBracketEdit({
       team2: { player1: p3, player2: p4 },
       isCompleted: false,
     };
-    setPendingMatches(prev => [...prev, newMatch]);
+    const newMatches = [...pendingMatches, newMatch];
+    setPendingMatches(newMatches);
+    autoSave(newMatches, deletedMatchIds, pendingRoundsCount);
   };
 
   // ── matchType 인라인 변경 ─────────────────────────────────────────────────────
 
   const handleMatchTypeChange = (matchId: string, newType: MatchType) => {
     pushUndo();
-    setPendingMatches(prev =>
-      prev.map(m => m.id === matchId ? { ...m, matchType: newType } : m)
-    );
+    const newMatches = pendingMatches.map(m => m.id === matchId ? { ...m, matchType: newType } : m);
+    setPendingMatches(newMatches);
+    autoSave(newMatches, deletedMatchIds, pendingRoundsCount);
   };
 
   // ── 드래그앤드롭: 경기 카드 ───────────────────────────────────────────────────
@@ -295,6 +319,7 @@ export function useBracketEdit({
     setPendingMatches(newPending);
     setDragMatchId(null);
     setDragOverMatchId(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
   const handleDragToEmptyRound = (targetRound: number) => {
@@ -310,6 +335,7 @@ export function useBracketEdit({
     setDragMatchId(null);
     setDragOverMatchId(null);
     setDragOverEmptyRound(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
   // ── 드래그앤드롭: 라운드 순서 ────────────────────────────────────────────────
@@ -321,13 +347,15 @@ export function useBracketEdit({
       return;
     }
     pushUndo();
-    setPendingMatches(prev => prev.map(m => {
+    const newPending = pendingMatches.map(m => {
       if (m.round === dragRound) return { ...m, round: targetRound };
       if (m.round === targetRound) return { ...m, round: dragRound };
       return m;
-    }));
+    });
+    setPendingMatches(newPending);
     setDragRound(null);
     setDragOverRound(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
   // ── 드래그앤드롭: 선수 ────────────────────────────────────────────────────────
@@ -357,6 +385,7 @@ export function useBracketEdit({
       tgtMatch[targetTeam][targetSlot] = benchDragPlayer;
       setPendingMatches(newPending);
       setBenchDragPlayer(null);
+      autoSave(newPending, deletedMatchIds, pendingRoundsCount);
       return;
     }
     if (!dragPlayerSource) return;
@@ -380,6 +409,7 @@ export function useBracketEdit({
     tgtMatch[targetTeam][targetSlot] = srcPlayer;
     setPendingMatches(newPending);
     setDragPlayerSource(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
   const handleBenchDragStart = (player: Player) => {
@@ -423,6 +453,7 @@ export function useBracketEdit({
     });
     setPendingMatches(newPending);
     setSubstituteTarget(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
   return {
@@ -449,9 +480,7 @@ export function useBracketEdit({
     setDragOverRound,
     // handlers
     startEditWithMatches,
-    handleEditCancel,
     handleRoundCountChange,
-    handleEditSave,
     handleAutoFillRound,
     handleDeleteMatch,
     handleDeleteRound,

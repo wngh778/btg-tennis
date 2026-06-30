@@ -177,13 +177,25 @@ export function useGenerateModal({
     if (!session) return;
     setShowGenerateModal(false);
     const targetGroups = groupId === 'all' ? groups : groups.filter(g => g.id === groupId);
+
+    // 전체 재생성: React state가 stale할 수 있으므로 DB에서 최신 데이터를 읽어 삭제
+    // 전체(all): 세션 내 모든 경기 삭제 (고아 경기 포함 완전 초기화)
+    // 단일 조: DB에서 해당 조 경기만 조회해서 삭제
+    const freshMatches = await getMatches(session.id);
+    if (groupId === 'all') {
+      for (const m of freshMatches) await deleteMatch(m.id);
+    } else {
+      const staleIds = freshMatches.filter(m => targetGroups.some(g => g.id === m.groupId)).map(m => m.id);
+      for (const id of staleIds) await deleteMatch(id);
+    }
+
     for (const group of targetGroups) {
       const groupPlayers = attendingPlayers.filter(p => group.memberIds.includes(p.id));
       if (groupPlayers.length < 4) continue;
+      const activeCourtsForGroup = Math.min(generateCourts, Math.floor(groupPlayers.length / 4));
       let totalRounds = generateRounds;
       if (generateMode === 'games') {
-        const activeCourts = Math.min(generateCourts, Math.floor(groupPlayers.length / 4));
-        const playing = activeCourts * 4;
+        const playing = activeCourtsForGroup * 4;
         totalRounds = playing > 0
           ? Math.round(generateTargetGames * groupPlayers.length / playing)
           : generateRounds;
@@ -197,8 +209,6 @@ export function useGenerateModal({
         totalRounds,
         strategy: generateStrategy,
       });
-      const existingGroupMatches = matches.filter(m => m.groupId === group.id);
-      for (const m of existingGroupMatches) await deleteMatch(m.id);
       for (const m of generated) await insertMatch(m);
     }
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
