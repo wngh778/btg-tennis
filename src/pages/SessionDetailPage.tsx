@@ -615,6 +615,7 @@ export default function SessionDetailPage() {
         <GenerateModeModal
           isSuperAdmin={isSuperAdmin}
           currentClubName={currentClub?.name}
+          gameMode={session.gameMode}
           onClose={() => setShowModeModal(false)}
           onSelectNormal={() => { setShowModeModal(false); handleGenerateClick(); }}
           onSelectFixedPair={() => {

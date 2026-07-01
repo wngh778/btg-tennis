@@ -232,6 +232,8 @@ export function useGenerateModal({
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
     // 생성된 조 탭으로 즉시 이동 (재생성 후 필터 동기화)
     setSelectedGroupId(groupId === 'all' ? null : groupId);
+    // stale pendingMatches 즉시 비워 재생성 직후 이전 대진표가 순간 노출되지 않도록
+    startEditWithMatches([], 0);
     await load();
     changeTab('bracket');
   };

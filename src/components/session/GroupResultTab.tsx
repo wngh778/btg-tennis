@@ -13,8 +13,10 @@ export function GroupResultTab({
   const crossMatches = matches.filter(m => !m.groupId);
   const hasCrossMatches = crossMatches.length > 0;
 
+  // 조간 대진이 있으면 'cross' 탭을 우선 선택 (조 내부 경기가 없거나 조간만 생성된 경우 유용)
+  // 조간 대진이 없으면 첫 번째 조 선택
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
-    groups.length > 0 ? groups[0].id : (hasCrossMatches ? 'cross' : null)
+    hasCrossMatches ? 'cross' : (groups.length > 0 ? groups[0].id : null)
   );
   const showAll = isAdmin && selectedGroupId === null;
 

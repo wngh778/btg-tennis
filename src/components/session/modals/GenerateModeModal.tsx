@@ -1,6 +1,7 @@
 interface GenerateModeModalProps {
   isSuperAdmin: boolean;
   currentClubName: string | undefined;
+  gameMode?: 'normal' | 'group';
   onClose: () => void;
   onSelectNormal: () => void;
   onSelectFixedPair: () => void;
@@ -11,12 +12,14 @@ interface GenerateModeModalProps {
 export function GenerateModeModal({
   isSuperAdmin,
   currentClubName,
+  gameMode,
   onClose,
   onSelectNormal,
   onSelectFixedPair,
   onSelectMonday,
   onSelectManual,
 }: GenerateModeModalProps) {
+  const isGroupMode = gameMode === 'group';
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-xs max-h-[92vh] flex flex-col">
@@ -39,22 +42,24 @@ export function GenerateModeModal({
             </div>
           </button>
 
-          {/* 대회연습모드 */}
-          <button
-            onClick={onSelectFixedPair}
-            className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-xl">🟣</span>
-              <div>
-                <p className="font-semibold text-slate-800 text-sm group-hover:text-purple-700">대회연습모드</p>
-                <p className="text-xs text-slate-400 mt-0.5">고정 페어가 항상 같은 팀 — 나머지 균등 배정</p>
+          {/* 대회연습모드 — 그룹 모드에서는 그룹 개념 없이 경기를 생성하므로 표시 안 함 */}
+          {!isGroupMode && (
+            <button
+              onClick={onSelectFixedPair}
+              className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-purple-400 hover:bg-purple-50 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🟣</span>
+                <div>
+                  <p className="font-semibold text-slate-800 text-sm group-hover:text-purple-700">대회연습모드</p>
+                  <p className="text-xs text-slate-400 mt-0.5">고정 페어가 항상 같은 팀 — 나머지 균등 배정</p>
+                </div>
               </div>
-            </div>
-          </button>
+            </button>
+          )}
 
-          {/* 월요일 편성 (superadmin + 비일요일 클럽) */}
-          {isSuperAdmin && !currentClubName?.includes('일요일') && (
+          {/* 월요일 편성 (superadmin + 비일요일 클럽 + 비그룹 모드) */}
+          {!isGroupMode && isSuperAdmin && !currentClubName?.includes('일요일') && (
             <button
               onClick={onSelectMonday}
               className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all group"
