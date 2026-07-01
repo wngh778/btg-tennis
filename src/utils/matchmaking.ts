@@ -382,7 +382,17 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
     }
   }
 
-  return allMatches;
+  // 라운드 번호 갭 제거: 특정 플레이어 구성(예: quarterly에서 여성 4명 미만)으로
+  // 특정 라운드에 경기가 0개인 경우 allMatches에 해당 round 번호가 없어
+  // DB에 [1, 3, 5] 같은 갭이 생김 → 1부터 연속 번호로 재번호
+  if (allMatches.length === 0) return allMatches;
+  const uniqueRounds = [...new Set(allMatches.map(m => m.round))].sort((a, b) => a - b);
+  if (uniqueRounds.length === uniqueRounds[uniqueRounds.length - 1]) {
+    // 이미 1부터 연속 번호 → 그대로 반환
+    return allMatches;
+  }
+  const roundRemap = new Map(uniqueRounds.map((r, i) => [r, i + 1]));
+  return allMatches.map(m => ({ ...m, round: roundRemap.get(m.round) ?? m.round }));
 }
 
 // ─── 대회연습모드: 고정 페어가 항상 같은 팀으로 출전 ───────────────────────────

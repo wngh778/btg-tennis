@@ -61,6 +61,8 @@ interface BracketTabProps {
   onRoundCountChange: (delta: number) => void;
   onUndo: () => void;
   onShowModeModal: () => void;
+  onShareLink: () => void;
+  onSimpleView: () => void;
   onAutoFillRound: (round: number) => void;
   onDeleteMatch: (matchId: string) => void;
   onDeleteRound: (round: number) => void;
@@ -110,6 +112,8 @@ export function BracketTab({
   onRoundCountChange,
   onUndo,
   onShowModeModal,
+  onShareLink,
+  onSimpleView,
   onAutoFillRound,
   onDeleteMatch,
   onDeleteRound,
@@ -244,6 +248,23 @@ export function BracketTab({
           >
             {session.isGenerated ? '대진표 재생성' : '대진표 생성'}
           </button>
+        )}
+        {/* 공유 / 간소화 버튼 — 대진표가 있을 때만 표시 */}
+        {matches.length > 0 && (
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={onShareLink}
+              className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+            >
+              🔗 공유
+            </button>
+            <button
+              onClick={onSimpleView}
+              className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+            >
+              간소화 보기
+            </button>
+          </div>
         )}
       </div>
 

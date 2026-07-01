@@ -534,78 +534,61 @@ export default function SessionDetailPage() {
 
       {/* ── 대진표 탭 ────────────────────────────────────────────────────── */}
       {tab === 'bracket' && (
-        <div className="space-y-4">
-          {/* 상단 공유 / 간소화 버튼 */}
-          {matches.length > 0 && (
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end">
-              <button
-                onClick={() => {
-                  const url = window.location.origin + '/c/' + session.clubId + '/' + session.id;
-                  navigator.clipboard.writeText(url)
-                    .then(() => alert('링크가 복사되었습니다'))
-                    .catch(() => alert('링크가 복사되었습니다'));
-                }}
-                className="px-3 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
-              >
-                공유 링크 복사
-              </button>
-              <button
-                onClick={() => setShowSimpleView(true)}
-                className="px-3 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
-              >
-                간소화 보기
-              </button>
-            </div>
-          )}
-          <BracketTab
-            session={session}
-            matches={matches}
-            attendingPlayers={attendingPlayers}
-            groups={groups}
-            selectedGroupId={selectedGroupId}
-            setSelectedGroupId={setSelectedGroupId}
-            pendingMatches={pendingMatches}
-            pendingRoundsCount={pendingRoundsCount}
-            matchGameNumbers={matchGameNumbers}
-            isAdminUser={isAdminUser}
-            user={user}
-            editMode={editMode}
-            saving={saving}
-            canUndo={canUndo}
-            playerGroupMap={playerGroupMap}
-            removedFromBracket={removedFromBracket}
-            addedToBracket={addedToBracket}
-            substituteTarget={substituteTarget}
-            dragMatchId={dragMatchId}
-            dragOverMatchId={dragOverMatchId}
-            dragOverEmptyRound={dragOverEmptyRound}
-            dragRound={dragRound}
-            dragOverRound={dragOverRound}
-            setDragMatchId={setDragMatchId}
-            setDragOverMatchId={setDragOverMatchId}
-            setDragOverEmptyRound={setDragOverEmptyRound}
-            setDragRound={setDragRound}
-            setDragOverRound={setDragOverRound}
-            onScoreUpdate={handleScoreUpdate}
-            onResetBracket={handleResetBracket}
-            onSyncBracket={handleSyncBracket}
-            onRoundCountChange={handleRoundCountChange}
-            onUndo={handleUndo}
-            onShowModeModal={() => setShowModeModal(true)}
-            onAutoFillRound={handleAutoFillRound}
-            onDeleteMatch={handleDeleteMatch}
-            onDeleteRound={handleDeleteRound}
-            onAddMatch={handleAddMatch}
-            onMatchTypeChange={handleMatchTypeChange}
-            onDragDrop={handleDragDrop}
-            onDragToEmptyRound={handleDragToEmptyRound}
-            onRoundDrop={handleRoundDrop}
-            onPlayerDragStart={editMode ? handlePlayerDragStart : undefined}
-            onPlayerDrop={editMode ? handlePlayerDrop : undefined}
-            onBenchDragStart={editMode ? handleBenchDragStart : undefined}
-            onPlayerClick={handlePlayerClick}
-          />
-        </div>
+        <BracketTab
+          session={session}
+          matches={matches}
+          attendingPlayers={attendingPlayers}
+          groups={groups}
+          selectedGroupId={selectedGroupId}
+          setSelectedGroupId={setSelectedGroupId}
+          pendingMatches={pendingMatches}
+          pendingRoundsCount={pendingRoundsCount}
+          matchGameNumbers={matchGameNumbers}
+          isAdminUser={isAdminUser}
+          user={user}
+          editMode={editMode}
+          saving={saving}
+          canUndo={canUndo}
+          playerGroupMap={playerGroupMap}
+          removedFromBracket={removedFromBracket}
+          addedToBracket={addedToBracket}
+          substituteTarget={substituteTarget}
+          dragMatchId={dragMatchId}
+          dragOverMatchId={dragOverMatchId}
+          dragOverEmptyRound={dragOverEmptyRound}
+          dragRound={dragRound}
+          dragOverRound={dragOverRound}
+          setDragMatchId={setDragMatchId}
+          setDragOverMatchId={setDragOverMatchId}
+          setDragOverEmptyRound={setDragOverEmptyRound}
+          setDragRound={setDragRound}
+          setDragOverRound={setDragOverRound}
+          onScoreUpdate={handleScoreUpdate}
+          onResetBracket={handleResetBracket}
+          onSyncBracket={handleSyncBracket}
+          onRoundCountChange={handleRoundCountChange}
+          onUndo={handleUndo}
+          onShowModeModal={() => setShowModeModal(true)}
+          onShareLink={() => {
+            const url = window.location.origin + '/c/' + session.clubId + '/' + session.id;
+            navigator.clipboard.writeText(url)
+              .then(() => alert('링크가 복사되었습니다'))
+              .catch(() => alert('링크가 복사되었습니다'));
+          }}
+          onSimpleView={() => setShowSimpleView(true)}
+          onAutoFillRound={handleAutoFillRound}
+          onDeleteMatch={handleDeleteMatch}
+          onDeleteRound={handleDeleteRound}
+          onAddMatch={handleAddMatch}
+          onMatchTypeChange={handleMatchTypeChange}
+          onDragDrop={handleDragDrop}
+          onDragToEmptyRound={handleDragToEmptyRound}
+          onRoundDrop={handleRoundDrop}
+          onPlayerDragStart={editMode ? handlePlayerDragStart : undefined}
+          onPlayerDrop={editMode ? handlePlayerDrop : undefined}
+          onBenchDragStart={editMode ? handleBenchDragStart : undefined}
+          onPlayerClick={handlePlayerClick}
+        />
       )}
 
       {/* ── 참석인원 상세 탭 ─────────────────────────────────────────────── */}

@@ -149,6 +149,9 @@ export function useGenerateModal({
     });
     // 재생성 후 전체 보기로 초기화 (suffix 탭 등 필터가 남아있으면 일부 라운드만 표시됨)
     setSelectedGroupId(null);
+    // pendingMatches를 즉시 비워 stale 대진표가 잠깐 보이는 현상 방지
+    // (load()는 비동기라 완료 전까지 이전 편집 상태가 화면에 남을 수 있음)
+    startEditWithMatches([], 0);
     load();
     changeTab('bracket');
   };
@@ -241,13 +244,17 @@ export function useGenerateModal({
 
     setShowGenerateModal(false);
 
+    // stale React state(matches) 대신 DB에서 최신 경기 조회 후 삭제
+    // (직전 autoSave가 진행 중일 수 있어 React state가 stale할 수 있음)
+    const freshMatches = await getMatches(session.id);
+
     // 기존 조간 대진 경기(groupId 없는 경기) 삭제
-    const existingCrossMatches = matches.filter(m => !m.groupId);
+    const existingCrossMatches = freshMatches.filter(m => !m.groupId);
     for (const m of existingCrossMatches) await deleteMatch(m.id);
 
     // 해당 쌍에 포함된 조들의 내부 대진도 삭제 (조간 대진 생성 시 내부 대진은 불필요)
     const involvedGroupIds = new Set(validPairs.flatMap(p => [p.groupAId, p.groupBId]));
-    const existingInternalMatches = matches.filter(m => m.groupId && involvedGroupIds.has(m.groupId));
+    const existingInternalMatches = freshMatches.filter(m => m.groupId && involvedGroupIds.has(m.groupId));
     for (const m of existingInternalMatches) await deleteMatch(m.id);
 
     // 각 대결 쌍에 코트 분배: 나머지 코트는 앞 쌍부터 1개씩 추가 배분
