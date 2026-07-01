@@ -150,9 +150,8 @@ export function useGenerateModal({
     // 재생성 후 전체 보기로 초기화 (suffix 탭 등 필터가 남아있으면 일부 라운드만 표시됨)
     setSelectedGroupId(null);
     // pendingMatches를 즉시 비워 stale 대진표가 잠깐 보이는 현상 방지
-    // (load()는 비동기라 완료 전까지 이전 편집 상태가 화면에 남을 수 있음)
     startEditWithMatches([], 0);
-    load();
+    await load();  // await: 데이터 갱신 완료 후 탭 전환 (새로고침 효과)
     changeTab('bracket');
   };
 
@@ -411,7 +410,7 @@ export function useGenerateModal({
     await saveMatches(session.id, generated);
     await updateSession(session.id, { isGenerated: true, courts: 1, rounds: mondayRounds, mixedRounds: 0 });
     setSelectedGroupId(null);
-    load();
+    await load();
     changeTab('bracket');
   };
 
@@ -439,7 +438,7 @@ export function useGenerateModal({
       mixedRounds: 0,
     });
     setSelectedGroupId(null);
-    load();
+    await load();
     changeTab('bracket');
   };
 
