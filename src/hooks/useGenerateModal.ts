@@ -158,7 +158,21 @@ export function useGenerateModal({
 
   const handleGenerate = async () => {
     if (!session) return;
-    if (session.type === 'weekly' && session.gameMode !== 'group') {
+
+    // ── 그룹 모드: 조 내부 or 조간 대진으로 분기 ──────────────────────────────
+    // 기존에는 이 분기가 없어 generateCrossGroup / generateMode 설정이 완전히 무시되고
+    // 항상 doGenerate(일반 매칭)가 호출됐음 → 라운드 2개, 미배정 선수 발생
+    if (session.gameMode === 'group') {
+      if (generateCrossGroup) {
+        await handleGenerateCrossGroupMatches();
+      } else {
+        await handleGenerateGroupMatches(generateTargetGroup);
+      }
+      return;
+    }
+
+    // ── 일반(weekly / quarterly) 모드 ─────────────────────────────────────────
+    if (session.type === 'weekly') {
       const maleCount = attendingPlayers.filter(p => p.gender === 'male').length;
       const femaleCount = attendingPlayers.filter(p => p.gender === 'female').length;
       if (maleCount > 0 && femaleCount > 0) {
@@ -263,6 +277,8 @@ export function useGenerateModal({
     const courtRemainder = generateCourts % validPairs.length;
 
     let courtOffset = 0;
+    let maxGeneratedRounds = 0; // 실제 생성된 최대 라운드 수 (updateSession에 사용)
+
     for (let pairIdx = 0; pairIdx < validPairs.length; pairIdx++) {
       const pair = validPairs[pairIdx];
       const pairCourts = baseCourtsPerPair + (pairIdx < courtRemainder ? 1 : 0);
@@ -303,9 +319,15 @@ export function useGenerateModal({
 
       for (const m of generated) await insertMatch(m);
       courtOffset += pairCourts;
+      if (pairRounds > maxGeneratedRounds) maxGeneratedRounds = pairRounds;
     }
 
-    await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
+    // rounds를 실제 생성된 최대 라운드 수로 저장 (generateRounds는 UI 기본값일 뿐)
+    await updateSession(session.id, {
+      isGenerated: true,
+      courts: generateCourts,
+      rounds: maxGeneratedRounds > 0 ? maxGeneratedRounds : generateRounds,
+    });
     // 조간 대진 생성 후 전체 보기로 초기화 (재생성 후 즉시 반영)
     setSelectedGroupId(null);
     await load();
