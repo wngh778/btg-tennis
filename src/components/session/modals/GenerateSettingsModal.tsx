@@ -216,34 +216,6 @@ export function GenerateSettingsModal({
               </div>
             )}
 
-            {/* 월례대회 균등 게임수 안내 */}
-            {session.type === 'monthly' && (() => {
-              const total = maleAttending + femaleAttending;
-              if (total < 4) return null;
-              const activeCourts = Math.min(generateCourts, Math.floor(total / 4));
-              const playing = activeCourts * 4;
-              const totalSlots = generateRounds * playing;
-              const avgGames = total > 0 ? (totalSlots / total).toFixed(1) : '0';
-              const isEven = total > 0 && totalSlots % total === 0;
-              // 연속 경기 없이 가능한지: 쉬는 수 >= 뛰는 수의 절반
-              // (각 라운드 쉬는 수 = total - playing, 이게 0이면 모두 연속)
-              const restPerRound = total - playing;
-              return (
-                <div className="bg-orange-50 rounded-xl p-3 space-y-1 text-xs">
-                  <p className="font-semibold text-orange-700">월례대회 예상</p>
-                  <p className="text-orange-600">
-                    {total}명 · {generateRounds}라운드 · {activeCourts}코트
-                    → 인당 {isEven ? `${avgGames}게임` : `${Math.floor(Number(avgGames))}~${Math.ceil(Number(avgGames))}게임`}
-                  </p>
-                  {restPerRound === 0 ? (
-                    <p className="text-amber-600">⚠ 매 라운드 전원 출전 — 연속 경기 불가피</p>
-                  ) : (
-                    <p className="text-green-600">✓ 라운드당 {restPerRound}명 휴식 — 연속 경기 최소화 가능</p>
-                  )}
-                </div>
-              );
-            })()}
-
             {/* 혼복 라운드 수 (weekly) */}
             {session.type === 'weekly' && (
               <div>

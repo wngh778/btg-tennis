@@ -91,7 +91,7 @@ function SessionForm({
       groupCount,
       courts,
       rounds,
-      mixedRounds: type === 'weekly' ? mixedRounds : 0,
+      mixedRounds: type === 'quarterly' ? 0 : mixedRounds,
       votingDeadline,
       trackLate,
     });
@@ -140,7 +140,6 @@ function SessionForm({
           >
             <option value="weekly">주간 경기</option>
             <option value="quarterly">분기대회</option>
-            <option value="monthly">월례대회</option>
           </select>
         </div>
       </div>
@@ -456,11 +455,9 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
                 <span className="text-xs text-slate-400">{formatDate(session.date)}</span>
               )}
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700'
-                : session.type === 'monthly' ? 'bg-orange-100 text-orange-700'
-                : 'bg-green-100 text-green-700'
+                session.type === 'quarterly' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
               }`}>
-                {session.type === 'quarterly' ? '분기대회' : session.type === 'monthly' ? '월례대회' : '주간'}
+                {session.type === 'quarterly' ? '분기대회' : '주간'}
               </span>
               {session.gameMode === 'group' && (
                 <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">조별경기</span>
@@ -472,7 +469,6 @@ function SessionCard({ session, onDelete, onSaved, isAdmin }: { session: Session
             <p className="text-slate-500 text-xs sm:text-sm">
               {session.courts}코트 · {session.rounds}라운드
               {session.type === 'weekly' && session.mixedRounds > 0 ? ` · 혼복 ${session.mixedRounds}R` : ''}
-              {session.type === 'monthly' ? ' · 균등배분' : ''}
               {session.votingDeadline
                 ? <>{' · 투표 마감: '}{new Date(session.votingDeadline).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', weekday: 'short' })}{isVotingClosed && !isPast && <span className="ml-1 text-orange-500">(마감)</span>}</>
                 : <span className="ml-1 text-green-600"> · 투표 마감 없음</span>

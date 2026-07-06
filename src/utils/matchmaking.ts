@@ -235,7 +235,7 @@ export interface GenerateOptions {
   totalRounds: number;
   mixedRounds: number; // 혼복 라운드 수
   mixedLast?: boolean; // true면 남복/여복 먼저, 혼복 나중 배치 (기본: 혼복 먼저)
-  sessionType: 'weekly' | 'quarterly' | 'monthly';
+  sessionType: 'weekly' | 'quarterly';
   pastMatches: Match[];
   latePlayerIds?: Set<string>; // 지각자 ID 집합 - 1라운드 제외
   strategy?: PairingStrategy; // 기본값: 'no-repeat-pair'
@@ -382,13 +382,9 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
     }
   }
 
-  // 라운드 번호 갭 제거: 특정 플레이어 구성으로 특정 라운드에 경기가 0개인 경우
-  // allMatches에 해당 round 번호가 없어 DB에 [1, 3, 5] 같은 갭이 생길 수 있음
-  // → 1부터 연속 번호로 재번호
-  //
-  // quarterly는 설계상 홀수=남복/짝수=여복으로 교대 배정되므로
-  // 한 성별만 있을 때 짝수/홀수 라운드가 비는 것이 정상 → 갭 제거 미적용
-  if (sessionType === 'quarterly') return allMatches;
+  // 라운드 번호 갭 제거: 특정 플레이어 구성(예: quarterly에서 여성 4명 미만)으로
+  // 특정 라운드에 경기가 0개인 경우 allMatches에 해당 round 번호가 없어
+  // DB에 [1, 3, 5] 같은 갭이 생김 → 1부터 연속 번호로 재번호
   if (allMatches.length === 0) return allMatches;
   const uniqueRounds = [...new Set(allMatches.map(m => m.round))].sort((a, b) => a - b);
   if (uniqueRounds.length === uniqueRounds[uniqueRounds.length - 1]) {

@@ -92,8 +92,7 @@ export function useGenerateModal({
     setGenerateRounds(session.rounds);
     setGenerateMixedRounds(session.mixedRounds);
     setGenerateTargetGroup('all');
-    // 월례대회: 연속 경기 제거 우선 전략을 기본으로 설정 (각자 균등 게임수 + 연속 경기 최소화)
-    setGenerateStrategy(session.type === 'monthly' ? 'balanced-rest' : 'no-repeat-pair');
+    setGenerateStrategy('no-repeat-pair');
     setGenerateCrossGroup(false);
     // 이름 suffix(마지막 단어) 기준으로 자동 대결 쌍 감지
     // 예: ["OB A조","OB B조","YB A조","YB B조"] → [(OB A조 vs YB A조), (OB B조 vs YB B조)]
