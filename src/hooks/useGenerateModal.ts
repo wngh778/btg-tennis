@@ -5,7 +5,7 @@ import {
 } from '../lib/database';
 import {
   generateMatches, generateGroupMatches, generateFixedPairMatches,
-  generateCrossGroupMatches,
+  generateCrossGroupMatches, generateMonthlyMatches,
   calcOptimalGroupRounds, calculateExpectedGames, findOptimalMixedRounds,
 } from '../utils/matchmaking';
 import type { PairingStrategy } from '../utils/matchmaking';
@@ -359,22 +359,16 @@ export function useGenerateModal({
   };
 
   // ── 월례대회 대진 생성 ─────────────────────────────────────────────────────
-  // 설정 모달 없이 즉시 생성: 중복 페어 없음 우선(no-repeat-pair), 혼복 없음
+  // 설정 모달 없이 즉시 생성: C(후보,4) 조합 탐색으로 중복 파트너 페어 최소화
+  // generateMonthlyMatches — 출전 선수 선택 단계부터 페어 중복을 최소화하는 전용 알고리즘
   const handleMonthlyGenerate = async () => {
     if (!session) return;
     setShowModeModal(false);
-    const allClubMatches = await getAllMatches(session.clubId);
-    const pastMatches = allClubMatches.filter(m => m.sessionId !== session.id);
-    const generated = generateMatches({
+    const generated = generateMonthlyMatches({
       sessionId: session.id,
       players: attendingPlayers,
       courts: session.courts,
       totalRounds: session.rounds,
-      mixedRounds: 0,
-      sessionType: session.type,
-      pastMatches,
-      latePlayerIds: new Set(),
-      strategy: 'no-repeat-pair',
     });
     await saveMatches(session.id, generated);
     await updateSession(session.id, {

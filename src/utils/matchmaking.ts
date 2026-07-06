@@ -755,6 +755,130 @@ export function generateGroupMatches(options: GroupGenerateOptions): Omit<Match,
   return allMatches;
 }
 
+// ─── 월례대회 대진: 중복 페어 최소화 최우선 (연속경기 허용) ─────────────────────────
+// 출전 선수 선택 단계에서 C(후보,4) 조합 전수 탐색 → 중복 파트너 페어 최소 조합 선택
+// 선택된 4명 내에서 3가지 페어링 중 NTRP 균형도 함께 최적화
+// 연속경기 패널티 없음 (월례대회 특성)
+
+export interface MonthlyGenerateOptions {
+  sessionId: string;
+  players: Player[];
+  courts: number;
+  totalRounds: number;
+}
+
+function combinations<T>(arr: T[], k: number): T[][] {
+  if (k === 0) return [[]];
+  if (arr.length < k) return [];
+  const [first, ...rest] = arr;
+  return [
+    ...combinations(rest, k - 1).map(c => [first, ...c]),
+    ...combinations(rest, k),
+  ];
+}
+
+export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Match, 'id'>[] {
+  const { sessionId, players, courts, totalRounds } = options;
+
+  // 파트너 페어 횟수 추적 (중복 페어 감지용)
+  const pairCount = new Map<string, number>();
+  const pairKey = (a: Player, b: Player) => [a.id, b.id].sort().join('|');
+  const getPairCount = (a: Player, b: Player) => pairCount.get(pairKey(a, b)) ?? 0;
+  const incPairCount = (a: Player, b: Player) => {
+    const k = pairKey(a, b);
+    pairCount.set(k, (pairCount.get(k) ?? 0) + 1);
+  };
+
+  const gameCounts = new Map<string, number>(players.map(p => [p.id, 0]));
+  const allMatches: Omit<Match, 'id'>[] = [];
+
+  for (let round = 1; round <= totalRounds; round++) {
+    const activeCourts = Math.min(courts, Math.floor(players.length / 4));
+    if (activeCourts === 0) continue;
+
+    const usedInRound = new Set<string>();
+
+    for (let c = 0; c < activeCourts; c++) {
+      // 이번 라운드 미배정 선수 (게임수 적은 순 + 랜덤 타이브레이크)
+      const available = [...players]
+        .filter(p => !usedInRound.has(p.id))
+        .sort((a, b) => {
+          const d = (gameCounts.get(a.id) || 0) - (gameCounts.get(b.id) || 0);
+          return d !== 0 ? d : Math.random() - 0.5;
+        });
+
+      if (available.length < 4) continue;
+
+      // 후보 상한: C(8,4)=70, C(10,4)=210 — 충분히 빠름
+      const candidateLimit = Math.min(available.length, 8);
+      const candidates = available.slice(0, candidateLimit);
+      const combos = combinations(candidates, 4);
+
+      let bestGroup = candidates.slice(0, 4);
+      let bestGroupScore = Infinity;
+
+      for (const combo of combos) {
+        // 이 4명의 3가지 페어링 중 최선(중복 패널티 최소) 점수
+        const cfgs: [[Player, Player], [Player, Player]][] = [
+          [[combo[0], combo[1]], [combo[2], combo[3]]],
+          [[combo[0], combo[2]], [combo[1], combo[3]]],
+          [[combo[0], combo[3]], [combo[1], combo[2]]],
+        ];
+        let minPairPenalty = Infinity;
+        for (const [[p1, p2], [p3, p4]] of cfgs) {
+          const penalty = getPairCount(p1, p2) * 10000 + getPairCount(p3, p4) * 10000;
+          if (penalty < minPairPenalty) minPairPenalty = penalty;
+        }
+        // 보조: 게임수 균등 (낮을수록 좋음)
+        const gameScore = combo.reduce((s, p) => s + (gameCounts.get(p.id) || 0), 0) * 5;
+        const total = minPairPenalty + gameScore;
+        if (total < bestGroupScore) {
+          bestGroupScore = total;
+          bestGroup = combo;
+        }
+      }
+
+      // bestGroup 내에서 최적 페어링 (중복 최소 + NTRP 균형)
+      const g = bestGroup;
+      const cfgs: [[Player, Player], [Player, Player]][] = [
+        [[g[0], g[1]], [g[2], g[3]]],
+        [[g[0], g[2]], [g[1], g[3]]],
+        [[g[0], g[3]], [g[1], g[2]]],
+      ];
+      let bestCfg = cfgs[0];
+      let bestCfgScore = Infinity;
+      for (const [[p1, p2], [p3, p4]] of cfgs) {
+        const score = getPairCount(p1, p2) * 10000 + getPairCount(p3, p4) * 10000
+          + Math.abs((p1.ntrp + p2.ntrp) - (p3.ntrp + p4.ntrp)) * 2;
+        if (score < bestCfgScore) { bestCfgScore = score; bestCfg = [[p1, p2], [p3, p4]]; }
+      }
+
+      const [[t1p1, t1p2], [t2p1, t2p2]] = bestCfg;
+
+      [t1p1, t1p2, t2p1, t2p2].forEach(p => {
+        gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1);
+        usedInRound.add(p.id);
+      });
+      incPairCount(t1p1, t1p2);
+      incPairCount(t2p1, t2p2);
+
+      const allP = [t1p1, t1p2, t2p1, t2p2];
+      const maleCnt = allP.filter(p => p.gender === 'male').length;
+      const matchType: MatchType = maleCnt === 4 ? 'male' : maleCnt === 0 ? 'female' : 'mixed';
+
+      allMatches.push({
+        sessionId, round, court: c + 1,
+        matchType,
+        team1: { player1: t1p1, player2: t1p2 },
+        team2: { player1: t2p1, player2: t2p2 },
+        isCompleted: false,
+      });
+    }
+  }
+
+  return allMatches;
+}
+
 // ─── 조간 대진: 서로 다른 조끼리 대결 ─────────────────────────────────────────
 // team1 = groupA 선수 2명, team2 = groupB 선수 2명.
 // 같은 조 선수끼리 파트너, 상대방은 다른 조 선수.
