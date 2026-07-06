@@ -4,6 +4,7 @@ interface GenerateModeModalProps {
   gameMode?: 'normal' | 'group';
   onClose: () => void;
   onSelectNormal: () => void;
+  onSelectMonthly: () => void;
   onSelectFixedPair: () => void;
   onSelectMonday: () => void;
   onSelectManual: () => void;
@@ -15,6 +16,7 @@ export function GenerateModeModal({
   gameMode,
   onClose,
   onSelectNormal,
+  onSelectMonthly,
   onSelectFixedPair,
   onSelectMonday,
   onSelectManual,
@@ -41,6 +43,22 @@ export function GenerateModeModal({
               </div>
             </div>
           </button>
+
+          {/* 월례대회 — 중복 페어 없음 우선, 연속 경기 허용, 설정 모달 없이 즉시 생성 */}
+          {!isGroupMode && (
+            <button
+              onClick={onSelectMonthly}
+              className="w-full text-left p-4 rounded-xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🟡</span>
+                <div>
+                  <p className="font-semibold text-slate-800 text-sm group-hover:text-amber-700">월례대회 대진</p>
+                  <p className="text-xs text-slate-400 mt-0.5">중복 페어 없음 최우선 — 연속 경기 허용</p>
+                </div>
+              </div>
+            </button>
+          )}
 
           {/* 대회연습모드 — 그룹 모드에서는 그룹 개념 없이 경기를 생성하므로 표시 안 함 */}
           {!isGroupMode && (

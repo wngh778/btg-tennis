@@ -358,6 +358,37 @@ export function useGenerateModal({
     );
   };
 
+  // ── 월례대회 대진 생성 ─────────────────────────────────────────────────────
+  // 설정 모달 없이 즉시 생성: 중복 페어 없음 우선(no-repeat-pair), 혼복 없음
+  const handleMonthlyGenerate = async () => {
+    if (!session) return;
+    setShowModeModal(false);
+    const allClubMatches = await getAllMatches(session.clubId);
+    const pastMatches = allClubMatches.filter(m => m.sessionId !== session.id);
+    const generated = generateMatches({
+      sessionId: session.id,
+      players: attendingPlayers,
+      courts: session.courts,
+      totalRounds: session.rounds,
+      mixedRounds: 0,
+      sessionType: session.type,
+      pastMatches,
+      latePlayerIds: new Set(),
+      strategy: 'no-repeat-pair',
+    });
+    await saveMatches(session.id, generated);
+    await updateSession(session.id, {
+      isGenerated: true,
+      courts: session.courts,
+      rounds: session.rounds,
+      mixedRounds: 0,
+    });
+    setSelectedGroupId(null);
+    startEditWithMatches([], 0);
+    await load();
+    changeTab('bracket');
+  };
+
   const handleMondayClick = () => {
     if (!session) return;
     const malePlayers = attendingPlayers.filter(p => p.gender === 'male');
@@ -552,6 +583,7 @@ export function useGenerateModal({
     handleGenerateGroupMatches,
     handleGenerateCrossGroupMatches,
     handleAiRecommend,
+    handleMonthlyGenerate,
     handleMondayClick,
     handleMondayGenerate,
     handleFixedPairGenerate,

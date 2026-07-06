@@ -193,7 +193,7 @@ export default function SessionDetailPage() {
     generateCrossGroup, setGenerateCrossGroup,
     crossGroupPairs, setCrossGroupPairs,
     handleGenerateClick, doGenerate, handleGenerate,
-    handleAiRecommend, handleMondayClick, handleMondayGenerate,
+    handleAiRecommend, handleMonthlyGenerate, handleMondayClick, handleMondayGenerate,
     handleFixedPairGenerate, handleManualTogglePlayer, handleManualSave,
   } = generateModal;
 
@@ -618,6 +618,7 @@ export default function SessionDetailPage() {
           gameMode={session.gameMode}
           onClose={() => setShowModeModal(false)}
           onSelectNormal={() => { setShowModeModal(false); handleGenerateClick(); }}
+          onSelectMonthly={() => { handleMonthlyGenerate(); }}
           onSelectFixedPair={() => {
             setShowModeModal(false);
             setFixedPairSelection([]);
