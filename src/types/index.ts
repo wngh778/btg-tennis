@@ -28,7 +28,7 @@ export interface Guest {
   sessionId: string;
 }
 
-export type SessionType = 'weekly' | 'quarterly';
+export type SessionType = 'weekly' | 'quarterly' | 'monthly';
 export type GameMode = 'normal' | 'group';
 
 export interface Session {
