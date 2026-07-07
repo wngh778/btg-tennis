@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import type { Player, Match, MatchType } from '../../types';
 
 export type SubstituteTarget = {
@@ -41,20 +41,24 @@ export function PlayerBadge({
   onDragStart?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
 }) {
-  // player 데이터가 없는 경우 (불량 DB 데이터) 빈 placeholder 표시
   if (!player) {
     return <div className="text-xs text-slate-400 px-1.5 py-0.5">-</div>;
   }
 
-  // 빈 슬롯 — 경기 추가 시 자동배정 없이 생성된 드롭 대상
+  // 빈 슬롯 — 클릭(substituteTarget 있을 때)과 드래그 드롭 모두 지원
   if (player.id.startsWith('placeholder_')) {
     return (
       <div
-        className="w-full rounded-lg px-2 py-1.5 border border-dashed border-slate-300 text-slate-400 text-xs text-center"
+        className={`w-full rounded-lg px-2 py-1.5 border border-dashed text-xs text-center transition-colors ${
+          editMode
+            ? 'border-slate-400 text-slate-500 bg-slate-50 hover:bg-yellow-50 hover:border-yellow-400 cursor-pointer'
+            : 'border-slate-300 text-slate-400'
+        }`}
+        onClick={editMode ? onClick : undefined}
         onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
         onDrop={e => { e.stopPropagation(); onDrop?.(e); }}
       >
-        여기에 드래그
+        {editMode ? '탭/드래그' : '빈 슬롯'}
       </div>
     );
   }
@@ -99,6 +103,7 @@ export function MatchCard({
   match, canEditScore, onScoreUpdate, editMode, substituteTarget, onPlayerClick, showNtrp,
   onDragStart, onDragOver, onDrop, isDragOver, matchGameNumbers, onDeleteMatch,
   onPlayerDragStart, onPlayerDrop, onMatchTypeChange,
+  onSetDragOver, onTouchDropToRound,
 }: {
   match: Match;
   canEditScore: boolean;
@@ -115,21 +120,58 @@ export function MatchCard({
   onDeleteMatch?: (matchId: string) => void;
   onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
   onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
-  /** 편집 모드에서 경기 유형 변경 */
   onMatchTypeChange?: (matchId: string, newType: MatchType) => void;
+  /** 모바일 터치 드래그용: dragOverMatchId 직접 설정 */
+  onSetDragOver?: (id: string | null) => void;
+  /** 모바일 터치 드래그 → 빈 라운드로 드롭 */
+  onTouchDropToRound?: (round: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [score1, setScore1] = useState(match.score1 || '');
   const [score2, setScore2] = useState(match.score2 || '');
+  // 저장 직후 로컬에서 점수를 즉시 표시 (부모 state 갱신 전 깜빡임 방지)
+  const [localScore1, setLocalScore1] = useState<string | null>(null);
+  const [localScore2, setLocalScore2] = useState<string | null>(null);
+  const [localCompleted, setLocalCompleted] = useState(false);
   const score2Ref = useRef<HTMLInputElement>(null);
 
-  const handleSave = () => {
-    onScoreUpdate(match.id, score1, score2);
+  // match prop이 바뀌면 로컬 편집 상태 동기화
+  const prevMatchIdRef = useRef(match.id);
+  if (prevMatchIdRef.current !== match.id) {
+    prevMatchIdRef.current = match.id;
+    setScore1(match.score1 || '');
+    setScore2(match.score2 || '');
+    setLocalScore1(null);
+    setLocalScore2(null);
+    setLocalCompleted(false);
     setEditing(false);
-  };
+  }
 
-  // 점수 입력 영역 전체에서 포커스가 벗어나면 자동 저장
-  // score1 입력 시 score2로 auto-focus되는 setTimeout과 충돌 방지를 위해 비동기 체크
+  const handleSave = useCallback(() => {
+    onScoreUpdate(match.id, score1, score2);
+    // 저장 즉시 로컬 표시 업데이트 — 부모 state 반영 전 깜빡임 방지
+    if (score1 !== '' || score2 !== '') {
+      setLocalScore1(score1);
+      setLocalScore2(score2);
+      setLocalCompleted(true);
+    }
+    setEditing(false);
+  }, [match.id, score1, score2, onScoreUpdate]);
+
+  const handleSaveAndNext = useCallback(() => {
+    handleSave();
+    // 다음 미완료 경기의 점수 입력 트리거 탐색
+    setTimeout(() => {
+      const triggers = document.querySelectorAll<HTMLElement>('[data-score-trigger]');
+      const ids = Array.from(triggers).map(el => el.getAttribute('data-score-trigger'));
+      const idx = ids.indexOf(match.id);
+      if (idx >= 0 && idx < triggers.length - 1) {
+        triggers[idx + 1].click();
+      }
+    }, 50);
+  }, [handleSave, match.id]);
+
+  // 점수 입력 영역 blur 시 자동 저장
   const handleContainerBlur = (e: React.FocusEvent<HTMLDivElement>) => {
     const currentTarget = e.currentTarget;
     setTimeout(() => {
@@ -139,22 +181,89 @@ export function MatchCard({
     }, 0);
   };
 
+  // ── 모바일 터치 드래그앤드롭 ───────────────────────────────────────────────
+  const touchState = useRef<{
+    dragging: boolean;
+    lastTargetId: string | null;
+    startX: number;
+    startY: number;
+  }>({ dragging: false, lastTargetId: null, startX: 0, startY: 0 });
+
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!editMode) return;
+    const touch = e.touches[0];
+    touchState.current = { dragging: false, lastTargetId: null, startX: touch.clientX, startY: touch.clientY };
+  }, [editMode]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!editMode) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchState.current.startX;
+    const dy = touch.clientY - touchState.current.startY;
+
+    // 10px 이상 이동하면 드래그 시작
+    if (!touchState.current.dragging && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      touchState.current.dragging = true;
+      onDragStart?.(match.id);
+    }
+    if (!touchState.current.dragging) return;
+
+    e.preventDefault();
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const matchEl = el?.closest('[data-match-id]');
+    const targetId = matchEl ? matchEl.getAttribute('data-match-id') : null;
+    if (targetId !== touchState.current.lastTargetId) {
+      touchState.current.lastTargetId = targetId;
+      onSetDragOver?.(targetId && targetId !== match.id ? targetId : null);
+    }
+  }, [editMode, match.id, onDragStart, onSetDragOver]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!editMode || !touchState.current.dragging) return;
+    const touch = e.changedTouches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+
+    // 빈 라운드 영역으로 드롭
+    const roundEl = el?.closest('[data-empty-round]');
+    if (roundEl) {
+      const roundNum = parseInt(roundEl.getAttribute('data-empty-round') || '0', 10);
+      if (roundNum > 0) onTouchDropToRound?.(roundNum);
+    } else {
+      // 다른 경기 카드로 드롭
+      const matchEl = el?.closest('[data-match-id]');
+      const targetId = matchEl ? matchEl.getAttribute('data-match-id') : null;
+      if (targetId && targetId !== match.id) {
+        onDrop?.(targetId);
+      }
+    }
+    onSetDragOver?.(null);
+    touchState.current = { dragging: false, lastTargetId: null, startX: 0, startY: 0 };
+  }, [editMode, match.id, onDrop, onSetDragOver, onTouchDropToRound]);
+
   const t1Ntrp = ((match.team1.player1.ntrp + match.team1.player2.ntrp) / 2).toFixed(1);
   const t2Ntrp = ((match.team2.player1.ntrp + match.team2.player2.ntrp) / 2).toFixed(1);
 
+  // 표시할 점수: 로컬 저장 값 우선, 그 다음 prop
+  const displayScore1 = localScore1 ?? match.score1 ?? '';
+  const displayScore2 = localScore2 ?? match.score2 ?? '';
+  const displayCompleted = localCompleted || match.isCompleted;
+
   return (
     <div
+      data-match-id={match.id}
       className={`p-4 border-l-4 ${matchTypeBg[match.matchType]} ${isDragOver ? 'ring-2 ring-inset ring-blue-400 bg-blue-50' : ''} ${editMode ? 'cursor-grab active:cursor-grabbing' : ''}`}
       draggable={editMode}
       onDragStart={editMode ? () => onDragStart?.(match.id) : undefined}
       onDragOver={editMode ? (e) => { e.preventDefault(); onDragOver?.(e); } : undefined}
       onDrop={editMode ? () => onDrop?.(match.id) : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           {editMode && <span className="text-slate-300 text-sm select-none">⠿</span>}
           <span className="font-semibold text-slate-600 text-sm">{match.round}R {match.court}코트</span>
-          {/* 편집 모드: 클릭으로 유형 순환, 일반 모드: 정적 뱃지 */}
           {editMode && onMatchTypeChange ? (
             <button
               onClick={e => { e.stopPropagation(); onMatchTypeChange(match.id, cycleMatchType(match.matchType)); }}
@@ -170,10 +279,15 @@ export function MatchCard({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {match.isCompleted && <span className="text-xs text-slate-400">✓ 완료</span>}
+          {displayCompleted && !editMode && <span className="text-xs text-slate-400">✓ 완료</span>}
           {editMode && onDeleteMatch && (
             <button
-              onClick={e => { e.stopPropagation(); onDeleteMatch(match.id); }}
+              onClick={e => {
+                e.stopPropagation();
+                if (window.confirm('이 경기를 삭제하시겠습니까?')) {
+                  onDeleteMatch(match.id);
+                }
+              }}
               className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
             >
               경기 삭제
@@ -210,10 +324,9 @@ export function MatchCard({
           {showNtrp && <div className="text-xs text-slate-400 mt-2">평균 {t1Ntrp}</div>}
         </div>
 
-        {/* Score — 클릭하면 바로 입력, blur 시 자동저장 */}
+        {/* Score */}
         <div className="text-center flex flex-col items-center gap-1 shrink-0 w-fit">
           {editing ? (
-            // 입력 중: 드래그 이벤트 차단, blur 시 자동저장
             <div
               className="flex items-center gap-1"
               onBlur={handleContainerBlur}
@@ -225,6 +338,7 @@ export function MatchCard({
                 onChange={e => {
                   const v = e.target.value;
                   setScore1(v);
+                  // 숫자 1자 입력 시 자동으로 score2로 이동
                   if (v.length >= 1 && /^\d+$/.test(v)) {
                     setTimeout(() => score2Ref.current?.focus(), 0);
                   }
@@ -240,36 +354,35 @@ export function MatchCard({
                 ref={score2Ref}
                 value={score2}
                 onChange={e => setScore2(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
+                onKeyDown={e => { if (e.key === 'Enter') handleSaveAndNext(); }}
                 className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 inputMode="numeric"
                 placeholder="0"
               />
             </div>
           ) : canEditScore ? (
-            // 점수 입력 권한 있음: 영역 전체 클릭으로 바로 입력 시작 (편집 모드에서도 동작)
             <div
+              data-score-trigger={match.id}
               onClick={e => { e.stopPropagation(); setEditing(true); }}
               className="cursor-pointer flex flex-col items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/60 transition-colors"
             >
-              {match.isCompleted ? (
+              {displayCompleted ? (
                 <div className="flex items-center gap-1">
-                  <span className="text-lg font-bold text-slate-800">{match.score1}</span>
+                  <span className="text-lg font-bold text-slate-800">{displayScore1}</span>
                   <span className="text-xs text-slate-400 font-bold">:</span>
-                  <span className="text-lg font-bold text-slate-800">{match.score2}</span>
+                  <span className="text-lg font-bold text-slate-800">{displayScore2}</span>
                 </div>
               ) : (
                 <div className="text-green-500 text-xs font-semibold">탭하여<br/>입력</div>
               )}
             </div>
           ) : (
-            // 점수 입력 권한 없음: 읽기 전용
             <div className="flex flex-col items-center gap-1">
-              {match.isCompleted ? (
+              {displayCompleted ? (
                 <div className="flex items-center gap-1">
-                  <span className="text-lg font-bold text-slate-800">{match.score1}</span>
+                  <span className="text-lg font-bold text-slate-800">{displayScore1}</span>
                   <span className="text-xs text-slate-400 font-bold">:</span>
-                  <span className="text-lg font-bold text-slate-800">{match.score2}</span>
+                  <span className="text-lg font-bold text-slate-800">{displayScore2}</span>
                 </div>
               ) : (
                 <div className="text-slate-300 text-sm">vs</div>
@@ -318,6 +431,7 @@ export function RoundCard({
   onPlayerDragStart, onPlayerDrop, onBenchDragStart,
   dragRound, dragOverRound, onRoundDragStart, onRoundDragOver, onRoundDrop,
   onAddMatch, onMatchTypeChange,
+  onSetDragOver, onTouchDropToRound,
 }: {
   round: number;
   matches: Match[];
@@ -344,16 +458,16 @@ export function RoundCard({
   onPlayerDragStart?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
   onPlayerDrop?: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void;
   onBenchDragStart?: (player: Player) => void;
-  // 라운드 순서 변경용 드래그
   dragRound?: number | null;
   dragOverRound?: number | null;
   onRoundDragStart?: (round: number) => void;
   onRoundDragOver?: (round: number | null) => void;
   onRoundDrop?: (round: number) => void;
-  /** 편집 모드에서 경기 추가 */
   onAddMatch?: (round: number) => void;
-  /** 편집 모드에서 경기 유형 변경 */
   onMatchTypeChange?: (matchId: string, newType: MatchType) => void;
+  /** 모바일 터치 드래그용 */
+  onSetDragOver?: (id: string | null) => void;
+  onTouchDropToRound?: (round: number) => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -407,7 +521,11 @@ export function RoundCard({
         <div className="flex items-center gap-2">
           {editMode && onDeleteRound && (
             <button
-              onClick={() => onDeleteRound(round)}
+              onClick={() => {
+                if (window.confirm(`${round}라운드를 삭제하시겠습니까?`)) {
+                  onDeleteRound(round);
+                }
+              }}
               className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
             >
               라운드 삭제
@@ -417,6 +535,7 @@ export function RoundCard({
       </div>
       {isEmptyRound ? (
         <div
+          data-empty-round={round}
           className={`px-5 py-6 text-center transition-colors ${dragOverEmptyRound === round ? 'bg-indigo-50 border-2 border-dashed border-indigo-400' : 'border-2 border-dashed border-slate-200'}`}
           onDragOver={e => { e.preventDefault(); onDragOverEmptyRound?.(round); }}
           onDragLeave={() => onDragOverEmptyRound?.(null)}
@@ -467,9 +586,10 @@ export function RoundCard({
               onPlayerDragStart={onPlayerDragStart}
               onPlayerDrop={onPlayerDrop}
               onMatchTypeChange={onMatchTypeChange}
+              onSetDragOver={onSetDragOver}
+              onTouchDropToRound={onTouchDropToRound}
             />
           ))}
-          {/* 편집 모드에서 경기 있는 라운드에도 경기 추가 버튼 */}
           {editMode && onAddMatch && (
             <div className="px-5 py-3 flex justify-center">
               <button

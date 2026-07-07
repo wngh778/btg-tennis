@@ -75,6 +75,9 @@ interface BracketTabProps {
   onPlayerDrop: ((matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void) | undefined;
   onBenchDragStart: ((player: Player) => void) | undefined;
   onPlayerClick: (matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2', player: Player) => void;
+  /** 모바일 터치 드래그앤드롭 지원 */
+  onSetDragOver: (id: string | null) => void;
+  onTouchDropToRound: (round: number) => void;
 }
 
 export function BracketTab({
@@ -126,6 +129,8 @@ export function BracketTab({
   onPlayerDrop,
   onBenchDragStart,
   onPlayerClick,
+  onSetDragOver,
+  onTouchDropToRound,
 }: BracketTabProps) {
   // ── suffix 기반 탭 계산 ─────────────────────────────────────────────────
   // 그룹 이름의 마지막 단어(suffix)로 묶음: "YB A군" → "A군", "OB A군" → "A군"
@@ -381,6 +386,8 @@ export function BracketTab({
             onRoundDrop={editMode ? onRoundDrop : undefined}
             onAddMatch={editMode ? onAddMatch : undefined}
             onMatchTypeChange={editMode ? onMatchTypeChange : undefined}
+            onSetDragOver={onSetDragOver}
+            onTouchDropToRound={onTouchDropToRound}
           />
         ))
       )}

@@ -588,6 +588,8 @@ export default function SessionDetailPage() {
           onPlayerDrop={editMode ? handlePlayerDrop : undefined}
           onBenchDragStart={editMode ? handleBenchDragStart : undefined}
           onPlayerClick={handlePlayerClick}
+          onSetDragOver={setDragOverMatchId}
+          onTouchDropToRound={handleDragToEmptyRound}
         />
       )}
 
