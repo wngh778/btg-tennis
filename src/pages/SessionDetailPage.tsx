@@ -146,7 +146,7 @@ export default function SessionDetailPage() {
     handleRoundCountChange,
     handleAutoFillRound, handleDeleteMatch, handleDeleteRound,
     handleAddMatch, handleMatchTypeChange, handleUndo,
-    handleDragDrop, handleDragToEmptyRound, handleRoundDrop,
+    handleDragDrop, handleDragToEmptyRound, handleRoundDrop, handleRoundSwap,
     handlePlayerDragStart, handlePlayerDrop, handleBenchDragStart,
     handlePlayerClick, handleSubstitute,
   } = bracketEdit;
@@ -584,6 +584,7 @@ export default function SessionDetailPage() {
           onDragDrop={handleDragDrop}
           onDragToEmptyRound={handleDragToEmptyRound}
           onRoundDrop={handleRoundDrop}
+          onRoundSwap={handleRoundSwap}
           onPlayerDragStart={editMode ? handlePlayerDragStart : undefined}
           onPlayerDrop={editMode ? handlePlayerDrop : undefined}
           onBenchDragStart={editMode ? handleBenchDragStart : undefined}

@@ -45,6 +45,12 @@ export function useBracketEdit({
   // true이면 hasOverlap 여부와 무관하게 정렬된 DB 상태로 재초기화
   const needsReloadRef = useRef(false);
 
+  // handleRoundCountChange / handleDeleteRound에서 설정한 목표 라운드 수.
+  // autoSave → load() 완료 시 useEffect([matches])가 실행되는데,
+  // 이때 session?.rounds가 stale(이전 값)일 수 있으므로 ref로 별도 추적해
+  // pendingRoundsCount가 잘못 되돌아가는 현상을 방지한다.
+  const targetRoundsCountRef = useRef<number | null>(null);
+
   // matches가 바뀔 때 pendingMatches 자동 초기화
   // - matches가 비어있으면 무조건 초기화 (대진 초기화 / 첫 로드)
   // - pendingMatches가 비어있으면 초기화 (최초 로드)
@@ -69,7 +75,13 @@ export function useBracketEdit({
       const copied: Match[] = JSON.parse(JSON.stringify(sorted));
       setPendingMatches(copied);
       const maxRound = Math.max(...copied.map(m => m.round));
-      setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
+      // targetRoundsCountRef에 값이 있으면 그것을 우선 사용 (stale session?.rounds 방지)
+      if (targetRoundsCountRef.current !== null) {
+        setPendingRoundsCount(Math.max(targetRoundsCountRef.current, maxRound));
+        targetRoundsCountRef.current = null;
+      } else {
+        setPendingRoundsCount(Math.max(session?.rounds ?? maxRound, maxRound));
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matches]);
@@ -94,6 +106,7 @@ export function useBracketEdit({
     setPendingRoundsCount(Math.max(rounds, maxRound));
     setSubstituteTarget(null);
     setDeletedMatchIds(new Set());
+    targetRoundsCountRef.current = null; // 재생성 시 ref 초기화
     clearUndo();
   };
 
@@ -190,6 +203,9 @@ export function useBracketEdit({
       toDelete.filter(m => !m.id.startsWith('temp_')).forEach(m => newDeletedIds.add(m.id));
       newMatches = pendingMatches.filter(m => m.round <= newCount);
     }
+    // load() 완료 후 useEffect가 실행될 때 session?.rounds가 stale할 수 있으므로
+    // 의도한 라운드 수를 ref에 보존해 pendingRoundsCount가 되돌아가지 않도록 한다.
+    targetRoundsCountRef.current = newCount;
     setPendingMatches(newMatches);
     setDeletedMatchIds(newDeletedIds);
     setPendingRoundsCount(newCount);
@@ -284,6 +300,8 @@ export function useBracketEdit({
       .filter(m => m.round !== round)
       .map(m => m.round > round ? { ...m, round: m.round - 1 } : m);
     const newCount = Math.max(1, pendingRoundsCount - 1);
+    // handleRoundCountChange와 동일: ref에 보존해 stale session?.rounds 방지
+    targetRoundsCountRef.current = newCount;
     setPendingMatches(newMatches);
     setDeletedMatchIds(newDeletedIds);
     setPendingRoundsCount(newCount);
@@ -383,6 +401,19 @@ export function useBracketEdit({
     setPendingMatches(newPending);
     setDragRound(null);
     setDragOverRound(null);
+    autoSave(newPending, deletedMatchIds, pendingRoundsCount);
+  };
+
+  /** ↑↓ 버튼으로 두 라운드를 서로 교체 (드래그 없이 라운드 순서 변경) */
+  const handleRoundSwap = (roundA: number, roundB: number) => {
+    if (roundA === roundB) return;
+    pushUndo();
+    const newPending = pendingMatches.map(m => {
+      if (m.round === roundA) return { ...m, round: roundB };
+      if (m.round === roundB) return { ...m, round: roundA };
+      return m;
+    });
+    setPendingMatches(newPending);
     autoSave(newPending, deletedMatchIds, pendingRoundsCount);
   };
 
@@ -518,6 +549,7 @@ export function useBracketEdit({
     handleDragDrop,
     handleDragToEmptyRound,
     handleRoundDrop,
+    handleRoundSwap,
     handlePlayerDragStart,
     handlePlayerDrop,
     handleBenchDragStart,

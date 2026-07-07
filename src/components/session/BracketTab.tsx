@@ -71,6 +71,7 @@ interface BracketTabProps {
   onDragDrop: (targetMatchId: string) => void;
   onDragToEmptyRound: (targetRound: number) => void;
   onRoundDrop: (targetRound: number) => void;
+  onRoundSwap: (roundA: number, roundB: number) => void;
   onPlayerDragStart: ((matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void) | undefined;
   onPlayerDrop: ((matchId: string, team: 'team1' | 'team2', slot: 'player1' | 'player2') => void) | undefined;
   onBenchDragStart: ((player: Player) => void) | undefined;
@@ -125,6 +126,7 @@ export function BracketTab({
   onDragDrop,
   onDragToEmptyRound,
   onRoundDrop,
+  onRoundSwap,
   onPlayerDragStart,
   onPlayerDrop,
   onBenchDragStart,
@@ -301,8 +303,11 @@ export function BracketTab({
       {/* 편집 안내 */}
       {isAdminUser && matches.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700 space-y-0.5">
-          <p>선수 클릭 → 교체 &nbsp;|&nbsp; 선수 드래그 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동</p>
-          <p>경기 유형 뱃지 클릭(↻) → 혼복/남복/여복 전환 &nbsp;|&nbsp; + 경기 추가 → 벤치 선수로 새 경기 생성</p>
+          {/* 모바일: 드래그 안내 제외 */}
+          <p className="sm:hidden">선수 탭 → 교체 &nbsp;|&nbsp; 뱃지 클릭(↻) → 혼복/남복/여복 전환 &nbsp;|&nbsp; ↑↓ 버튼 → 라운드 순서 변경</p>
+          {/* 데스크톱: 전체 안내 */}
+          <p className="hidden sm:block">선수 클릭 → 교체 &nbsp;|&nbsp; 선수 드래그 → 위치 교환 &nbsp;|&nbsp; 경기 카드 드래그 → 순서 이동 &nbsp;|&nbsp; ↑↓ → 라운드 이동</p>
+          <p className="hidden sm:block">경기 유형 뱃지 클릭(↻) → 혼복/남복/여복 전환 &nbsp;|&nbsp; + 경기 추가 → 벤치 선수로 새 경기 생성</p>
         </div>
       )}
 
@@ -351,45 +356,51 @@ export function BracketTab({
           {isAdminUser && <p className="text-slate-400 text-sm">참석 투표 완료 후 대진표를 생성하세요.</p>}
         </div>
       ) : (
-        displayRounds.map(round => (
-          <RoundCard
-            key={round}
-            round={round}
-            matches={filteredMatches.filter(m => m.round === round)}
-            attendingPlayers={roundAttendingPlayers}
-            canEditScore={!!user}
-            onScoreUpdate={onScoreUpdate}
-            editMode={editMode}
-            pendingMatches={filteredSource.filter(m => m.round === round)}
-            substituteTarget={substituteTarget}
-            onPlayerClick={onPlayerClick}
-            showNtrp={isAdminUser}
-            dragMatchId={dragMatchId}
-            dragOverMatchId={dragOverMatchId}
-            onDragStart={setDragMatchId}
-            onDragOver={setDragOverMatchId}
-            onDrop={onDragDrop}
-            dragOverEmptyRound={dragOverEmptyRound}
-            onDragOverEmptyRound={setDragOverEmptyRound}
-            onDropIntoRound={onDragToEmptyRound}
-            matchGameNumbers={matchGameNumbers}
-            onAutoFillRound={onAutoFillRound}
-            onDeleteMatch={onDeleteMatch}
-            onDeleteRound={onDeleteRound}
-            onPlayerDragStart={onPlayerDragStart}
-            onPlayerDrop={onPlayerDrop}
-            onBenchDragStart={onBenchDragStart}
-            dragRound={dragRound}
-            dragOverRound={dragOverRound}
-            onRoundDragStart={editMode ? setDragRound : undefined}
-            onRoundDragOver={editMode ? setDragOverRound : undefined}
-            onRoundDrop={editMode ? onRoundDrop : undefined}
-            onAddMatch={editMode ? onAddMatch : undefined}
-            onMatchTypeChange={editMode ? onMatchTypeChange : undefined}
-            onSetDragOver={onSetDragOver}
-            onTouchDropToRound={onTouchDropToRound}
-          />
-        ))
+        displayRounds.map((round, idx) => {
+          const prevRound = idx > 0 ? displayRounds[idx - 1] : null;
+          const nextRound = idx < displayRounds.length - 1 ? displayRounds[idx + 1] : null;
+          return (
+            <RoundCard
+              key={round}
+              round={round}
+              matches={filteredMatches.filter(m => m.round === round)}
+              attendingPlayers={roundAttendingPlayers}
+              canEditScore={!!user}
+              onScoreUpdate={onScoreUpdate}
+              editMode={editMode}
+              pendingMatches={filteredSource.filter(m => m.round === round)}
+              substituteTarget={substituteTarget}
+              onPlayerClick={onPlayerClick}
+              showNtrp={isAdminUser}
+              dragMatchId={dragMatchId}
+              dragOverMatchId={dragOverMatchId}
+              onDragStart={setDragMatchId}
+              onDragOver={setDragOverMatchId}
+              onDrop={onDragDrop}
+              dragOverEmptyRound={dragOverEmptyRound}
+              onDragOverEmptyRound={setDragOverEmptyRound}
+              onDropIntoRound={onDragToEmptyRound}
+              matchGameNumbers={matchGameNumbers}
+              onAutoFillRound={onAutoFillRound}
+              onDeleteMatch={onDeleteMatch}
+              onDeleteRound={onDeleteRound}
+              onPlayerDragStart={onPlayerDragStart}
+              onPlayerDrop={onPlayerDrop}
+              onBenchDragStart={onBenchDragStart}
+              dragRound={dragRound}
+              dragOverRound={dragOverRound}
+              onRoundDragStart={editMode ? setDragRound : undefined}
+              onRoundDragOver={editMode ? setDragOverRound : undefined}
+              onRoundDrop={editMode ? onRoundDrop : undefined}
+              onAddMatch={editMode ? onAddMatch : undefined}
+              onMatchTypeChange={editMode ? onMatchTypeChange : undefined}
+              onSetDragOver={onSetDragOver}
+              onTouchDropToRound={onTouchDropToRound}
+              onMoveUp={editMode && prevRound !== null ? () => onRoundSwap(round, prevRound) : undefined}
+              onMoveDown={editMode && nextRound !== null ? () => onRoundSwap(round, nextRound) : undefined}
+            />
+          );
+        })
       )}
     </div>
   );

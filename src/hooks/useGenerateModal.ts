@@ -90,7 +90,9 @@ export function useGenerateModal({
     if (!session) return;
     setGenerateCourts(session.courts);
     setGenerateRounds(session.rounds);
-    setGenerateMixedRounds(session.mixedRounds);
+    // 여성 참석자가 없으면 혼복 라운드를 0으로 강제 (남자만 있는 클럽 디폴트 수정)
+    const hasFemale = attendingPlayers.some(p => p.gender === 'female');
+    setGenerateMixedRounds(hasFemale ? session.mixedRounds : 0);
     setGenerateTargetGroup('all');
     setGenerateStrategy('no-repeat-pair');
     setGenerateCrossGroup(false);

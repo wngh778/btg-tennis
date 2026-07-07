@@ -147,29 +147,39 @@ export function MatchCard({
     setEditing(false);
   }
 
-  const handleSave = useCallback(() => {
-    onScoreUpdate(match.id, score1, score2);
+  // s1, s2를 명시적으로 받아 stale closure 없이 저장
+  // (onChange에서 setState 직전 값을 직접 전달할 때 사용)
+  const handleSave = useCallback((s1: string = score1, s2: string = score2) => {
+    onScoreUpdate(match.id, s1, s2);
     // 저장 즉시 로컬 표시 업데이트 — 부모 state 반영 전 깜빡임 방지
-    if (score1 !== '' || score2 !== '') {
-      setLocalScore1(score1);
-      setLocalScore2(score2);
+    if (s1 !== '' || s2 !== '') {
+      setLocalScore1(s1);
+      setLocalScore2(s2);
       setLocalCompleted(true);
     }
     setEditing(false);
   }, [match.id, score1, score2, onScoreUpdate]);
 
-  const handleSaveAndNext = useCallback(() => {
-    handleSave();
+  const handleSaveAndNext = useCallback((s1: string = score1, s2: string = score2) => {
+    onScoreUpdate(match.id, s1, s2);
+    // 저장 즉시 로컬 표시 업데이트
+    if (s1 !== '' || s2 !== '') {
+      setLocalScore1(s1);
+      setLocalScore2(s2);
+      setLocalCompleted(true);
+    }
+    setEditing(false);
     // 다음 미완료 경기의 점수 입력 트리거 탐색
+    const id = match.id;
     setTimeout(() => {
       const triggers = document.querySelectorAll<HTMLElement>('[data-score-trigger]');
       const ids = Array.from(triggers).map(el => el.getAttribute('data-score-trigger'));
-      const idx = ids.indexOf(match.id);
+      const idx = ids.indexOf(id);
       if (idx >= 0 && idx < triggers.length - 1) {
         triggers[idx + 1].click();
       }
     }, 50);
-  }, [handleSave, match.id]);
+  }, [match.id, score1, score2, onScoreUpdate]);
 
   // 점수 입력 영역 blur 시 자동 저장
   const handleContainerBlur = (e: React.FocusEvent<HTMLDivElement>) => {
@@ -353,7 +363,14 @@ export function MatchCard({
               <input
                 ref={score2Ref}
                 value={score2}
-                onChange={e => setScore2(e.target.value)}
+                onChange={e => {
+                  const v = e.target.value;
+                  setScore2(v);
+                  // 두 점수 모두 숫자 입력 시 자동 저장 + 다음 경기로 이동
+                  if (v !== '' && /^\d+$/.test(v) && score1 !== '' && /^\d+$/.test(score1)) {
+                    handleSaveAndNext(score1, v);
+                  }
+                }}
                 onKeyDown={e => { if (e.key === 'Enter') handleSaveAndNext(); }}
                 className="w-10 text-center border border-slate-300 rounded-lg py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 inputMode="numeric"
@@ -432,6 +449,7 @@ export function RoundCard({
   dragRound, dragOverRound, onRoundDragStart, onRoundDragOver, onRoundDrop,
   onAddMatch, onMatchTypeChange,
   onSetDragOver, onTouchDropToRound,
+  onMoveUp, onMoveDown,
 }: {
   round: number;
   matches: Match[];
@@ -468,6 +486,9 @@ export function RoundCard({
   /** 모바일 터치 드래그용 */
   onSetDragOver?: (id: string | null) => void;
   onTouchDropToRound?: (round: number) => void;
+  /** ↑↓ 버튼 라운드 순서 이동 (모바일용) */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const displayMatches = editMode ? pendingMatches : matches;
   const playingIds = new Set(
@@ -510,15 +531,37 @@ export function RoundCard({
         } : undefined}
       >
         <div className="flex items-center gap-2">
+          {/* 드래그 핸들 — 데스크톱 전용 */}
           {editMode && onRoundDragStart && (
-            <span className="text-slate-400 text-sm select-none">⠿⠿</span>
+            <span className="hidden sm:inline text-slate-400 text-sm select-none">⠿⠿</span>
           )}
           <h2 className="font-semibold text-slate-700">{round}라운드</h2>
           {isThisRoundDragOver && (
-            <span className="text-xs text-blue-500 font-medium">여기로 이동</span>
+            <span className="hidden sm:inline text-xs text-blue-500 font-medium">여기로 이동</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* ↑↓ 버튼 — 모바일 포함 항상 표시 (드래그가 어려운 환경에서 사용) */}
+          {editMode && (onMoveUp || onMoveDown) && (
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={onMoveUp}
+                disabled={!onMoveUp}
+                title="라운드 위로"
+                className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-sm"
+              >
+                ↑
+              </button>
+              <button
+                onClick={onMoveDown}
+                disabled={!onMoveDown}
+                title="라운드 아래로"
+                className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-sm"
+              >
+                ↓
+              </button>
+            </div>
+          )}
           {editMode && onDeleteRound && (
             <button
               onClick={() => {
@@ -541,7 +584,7 @@ export function RoundCard({
           onDragLeave={() => onDragOverEmptyRound?.(null)}
           onDrop={e => { e.preventDefault(); onDropIntoRound?.(round); onDragOverEmptyRound?.(null); }}
         >
-          <p className="text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
+          <p className="hidden sm:block text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
           <div className="flex justify-center gap-2">
             {onAutoFillRound && (
               <button
@@ -627,7 +670,7 @@ export function RoundCard({
             )
           ))}
           {editMode && (
-            <span className="text-xs text-amber-500 ml-1">← 코트 선수에게 드래그</span>
+            <span className="hidden sm:inline text-xs text-amber-500 ml-1">← 코트 선수에게 드래그</span>
           )}
         </div>
       )}
