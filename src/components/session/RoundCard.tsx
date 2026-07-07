@@ -272,7 +272,8 @@ export function MatchCard({
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          {editMode && <span className="text-slate-300 text-sm select-none">⠿</span>}
+          {/* 경기 카드 드래그 핸들 — 데스크톱 전용 */}
+          {editMode && <span className="hidden sm:inline text-slate-300 text-sm select-none">⠿</span>}
           <span className="font-semibold text-slate-600 text-sm">{match.round}R {match.court}코트</span>
           {editMode && onMatchTypeChange ? (
             <button
@@ -298,9 +299,10 @@ export function MatchCard({
                   onDeleteMatch(match.id);
                 }
               }}
-              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-0.5 rounded transition-colors"
+              title="경기 삭제"
+              className="w-6 h-6 flex items-center justify-center rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors text-base leading-none"
             >
-              경기 삭제
+              ×
             </button>
           )}
         </div>
@@ -381,7 +383,7 @@ export function MatchCard({
             <div
               data-score-trigger={match.id}
               onClick={e => { e.stopPropagation(); setEditing(true); }}
-              className="cursor-pointer flex flex-col items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/60 transition-colors"
+              className="cursor-pointer flex flex-col items-center gap-1 px-3 py-2 rounded-lg hover:bg-white/60 transition-colors min-w-[52px]"
             >
               {displayCompleted ? (
                 <div className="flex items-center gap-1">
@@ -394,7 +396,7 @@ export function MatchCard({
               )}
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-1 px-3 py-2 min-w-[52px]">
               {displayCompleted ? (
                 <div className="flex items-center gap-1">
                   <span className="text-lg font-bold text-slate-800">{displayScore1}</span>
@@ -569,9 +571,10 @@ export function RoundCard({
                   onDeleteRound(round);
                 }
               }}
-              className="text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+              title="라운드 삭제"
+              className="w-7 h-7 flex items-center justify-center rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors text-base leading-none"
             >
-              라운드 삭제
+              ×
             </button>
           )}
         </div>
@@ -584,8 +587,8 @@ export function RoundCard({
           onDragLeave={() => onDragOverEmptyRound?.(null)}
           onDrop={e => { e.preventDefault(); onDropIntoRound?.(round); onDragOverEmptyRound?.(null); }}
         >
-          <p className="hidden sm:block text-sm text-slate-400 mb-3">경기 카드를 여기로 드래그하세요</p>
-          <div className="flex justify-center gap-2">
+          <p className="hidden sm:block text-sm text-slate-400 mb-2">경기 카드를 여기로 드래그하세요</p>
+          <div className="flex flex-wrap justify-center gap-2">
             {onAutoFillRound && (
               <button
                 onClick={() => onAutoFillRound(round)}

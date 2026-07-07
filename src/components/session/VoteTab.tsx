@@ -387,13 +387,13 @@ export function VoteTab({
                       <>
                         <button
                           onClick={() => handleStartEditGuest(g)}
-                          className="text-amber-500 hover:text-amber-700 text-sm"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-600 hover:bg-amber-50 transition-colors"
                         >
                           수정
                         </button>
                         <button
                           onClick={() => handleRemoveGuest(g)}
-                          className="text-red-400 hover:text-red-600 text-sm"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:bg-red-50 transition-colors"
                         >
                           삭제
                         </button>

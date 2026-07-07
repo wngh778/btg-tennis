@@ -324,12 +324,16 @@ export function useBracketEdit({
     });
     const matchesInRound = pendingMatches.filter(m => m.round === round);
     const nextCourt = matchesInRound.length > 0 ? Math.max(...matchesInRound.map(m => m.court)) + 1 : 1;
+    // 참석 선수 성별 구성에 따라 기본 경기 유형 결정 (남자만 → 남복, 여자만 → 여복, 혼성 → 혼복)
+    const hasMale = attendingPlayers.some(p => p.gender === 'male');
+    const hasFemale = attendingPlayers.some(p => p.gender === 'female');
+    const defaultMatchType: MatchType = !hasMale ? 'female' : !hasFemale ? 'male' : 'mixed';
     const newMatch: Match = {
       id: `temp_${ts}`,
       sessionId: session.id,
       round,
       court: nextCourt,
-      matchType: 'mixed',
+      matchType: defaultMatchType,
       team1: { player1: emptySlot(1), player2: emptySlot(2) },
       team2: { player1: emptySlot(3), player2: emptySlot(4) },
       isCompleted: false,
