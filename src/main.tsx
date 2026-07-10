@@ -9,10 +9,12 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-// 기존 Service Worker 해제 (API 요청 가로채기로 인한 무한 로딩 원인이었음)
+// Service Worker 등록 — 홈화면 PWA 캐시 업데이트 자동화
+// 규칙: HTML은 항상 네트워크 우선, 해시된 JS/CSS는 캐시 우선, 외부 출처(Supabase)는 관여 안 함
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(reg => reg.unregister());
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // SW 등록 실패 시 앱 동작에 영향 없음 (graceful degradation)
+    });
   });
-  caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
 }

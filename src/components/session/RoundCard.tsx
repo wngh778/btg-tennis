@@ -66,14 +66,14 @@ export function PlayerBadge({
   const content = (
     <div className="flex items-center gap-1.5 min-w-0">
       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${player.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-      <span className="text-sm font-medium text-slate-800 break-words min-w-0">{player.name}</span>
+      <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{player.name}</span>
       {player.type === 'guest' && (
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
       {gameNum !== undefined && (
-        <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
+        <span className="hidden sm:inline text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
       )}
-      {showNtrp && <span className="text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
+      {showNtrp && <span className="hidden sm:inline text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
     </div>
   );
 

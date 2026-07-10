@@ -86,15 +86,16 @@ export default function StatsPage() {
       const team2Players = [m.team2.player1, m.team2.player2];
 
       if (s1 > s2) {
-        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 1; });
-        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.losses += 1; s.points -= 1; });
+        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
+        team2Players.forEach(p => { ensurePlayer(p.id).losses += 1; /* 패배: +0점 */ });
       } else if (s2 > s1) {
-        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 1; });
-        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.losses += 1; s.points -= 1; });
+        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
+        team1Players.forEach(p => { ensurePlayer(p.id).losses += 1; /* 패배: +0점 */ });
       } else {
         [...team1Players, ...team2Players].forEach(p => {
-          ensurePlayer(p.id).draws += 1;
-          // 무승부: 승점 변화 없음 (+0)
+          const s = ensurePlayer(p.id);
+          s.draws += 1;
+          s.points += 1; // 무승부: +1점
         });
       }
     });
@@ -441,7 +442,7 @@ export default function StatsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
-                          <span className={`font-medium ${isMe ? 'text-green-700' : 'text-slate-800'}`}>{s.name}</span>
+                          <span className={`font-medium whitespace-nowrap ${isMe ? 'text-green-700' : 'text-slate-800'}`}>{s.name}</span>
                           {isMe && <span className="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full">나</span>}
                         </div>
                       </td>
@@ -467,7 +468,7 @@ export default function StatsPage() {
       </div>
 
       <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
-        승점: 승리 +1점 · 무승부 0점 · 패배 -1점 · 출석 +1점
+        승점: 승리 +3점 · 무승부 +1점 · 패배 0점 · 출석 +1점
       </div>
     </div>
   );
