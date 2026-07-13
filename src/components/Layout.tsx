@@ -39,6 +39,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     window.scrollTo(0, 0);
+    // 라우트 변경(URL = 외부 시스템) 시 모바일 메뉴 닫기 — 의도된 동기화 패턴
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMenuOpen(false);
   }, [location.pathname]);
 

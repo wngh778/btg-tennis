@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
-import { toPng } from 'html-to-image';
 import { useParams } from 'react-router-dom';
 import { getClub, getSessions, getMatches, getAttendance, getSession, getSessionGroups } from '../lib/database';
 import type { Club, Session, Match, AttendanceRecord, Player, SessionGroup } from '../types';
 import { formatDate } from '../utils/formatting';
+import { shareElementAsPng } from '../utils/shareImage';
+import { SimpleBracketList } from '../components/session/SimpleBracketList';
 
 const matchTypeLabel = { male: '남복', female: '여복', mixed: '혼복' };
 const matchTypeBg = { male: 'bg-blue-50 border-blue-200', female: 'bg-pink-50 border-pink-200', mixed: 'bg-purple-50 border-purple-200' };
@@ -73,28 +74,7 @@ function SimpleSessionView({ session, matches, groups, clubName, clubColor }: {
     if (!captureRef.current) return;
     setSharing(true);
     try {
-      const el = captureRef.current;
-      const dataUrl = await toPng(el, {
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        width: el.offsetWidth,
-        height: el.scrollHeight,
-        style: { overflow: 'visible', height: `${el.scrollHeight}px` },
-      });
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], 'bracket.png', { type: 'image/png' });
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: session.title ?? formatDate(session.date) });
-      } else if (navigator.clipboard?.write) {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        alert('이미지가 클립보드에 복사되었습니다');
-      } else {
-        const a = document.createElement('a');
-        a.href = dataUrl;
-        a.download = 'bracket.png';
-        a.click();
-      }
+      await shareElementAsPng(captureRef.current, session.title ?? formatDate(session.date));
     } catch {
       alert('이미지 저장에 실패했습니다');
     } finally {
@@ -118,80 +98,9 @@ function SimpleSessionView({ session, matches, groups, clubName, clubColor }: {
         </div>
       </header>
 
-      {/* 이미지 캡처 대상: 세션 제목 + 경기 목록 */}
-      <div ref={captureRef} className="flex-1 flex flex-col max-w-sm mx-auto w-full bg-white">
-      {/* 세션 제목 */}
-      <div className="bg-white border-b border-slate-200 shrink-0">
-        <div className="px-4 py-2.5 flex items-center justify-between">
-          <span className="font-bold text-slate-800 text-sm">
-            {session.title ?? formatDate(session.date)}
-          </span>
-          <span className="text-xs text-slate-400">
-            {session.courts}코트 · {session.rounds}R
-          </span>
-        </div>
-      </div>
-
-      {/* 경기 목록 */}
-      <div className="flex-1 bg-white">
-        {matches.length === 0 ? (
-          <div className="text-center py-16 text-slate-400 text-sm">대진표가 없습니다.</div>
-        ) : session.gameMode === 'group' && groups.length > 0 ? (
-          groups.map(group => {
-            const groupMatches = [...matches]
-              .filter(m => m.groupId === group.id)
-              .sort((a, b) => a.round - b.round || a.court - b.court);
-            if (groupMatches.length === 0) return null;
-            const playerNumMap = new Map<string, number>();
-            group.memberIds.forEach((id, i) => playerNumMap.set(id, i + 1));
-            const pLabel = (p: Player) => {
-              const n = playerNumMap.get(p.id);
-              return n ? `${n}${p.name}` : p.name;
-            };
-            return (
-              <div key={group.id}>
-                <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
-                  <span className="font-bold text-slate-700 text-xs">{group.name}</span>
-                </div>
-                {groupMatches.map(m => (
-                  <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                    <span className="text-slate-700 text-right pr-1">{pLabel(m.team1.player1)} {pLabel(m.team1.player2)}</span>
-                    <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
-                      {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
-                    </span>
-                    <span className="text-slate-700 pl-1">{pLabel(m.team2.player1)} {pLabel(m.team2.player2)}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })
-        ) : (
-          (() => {
-            const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
-            return rounds.map(round => {
-              const roundMatches = matches
-                .filter(m => m.round === round)
-                .sort((a, b) => a.court - b.court);
-              return (
-                <div key={round}>
-                  <div className="px-3 py-1 bg-slate-100 border-b border-slate-200">
-                    <span className="font-bold text-slate-700 text-xs">{round}R</span>
-                  </div>
-                  {roundMatches.map(m => (
-                    <div key={m.id} className="grid grid-cols-[1fr_auto_1fr] items-center px-2 py-0.5 border-b border-slate-50 text-xs leading-tight">
-                      <span className="text-slate-700 text-right pr-1">{m.team1.player1.name} {m.team1.player2.name}</span>
-                      <span className="font-bold text-slate-800 px-1 shrink-0 tabular-nums text-center">
-                        {m.isCompleted ? `${m.score1}:${m.score2}` : 'vs'}
-                      </span>
-                      <span className="text-slate-700 pl-1">{m.team2.player1.name} {m.team2.player2.name}</span>
-                    </div>
-                  ))}
-                </div>
-              );
-            });
-          })()
-        )}
-      </div>
+      {/* 이미지 캡처 대상 */}
+      <div ref={captureRef} className="flex-1 max-w-sm mx-auto w-full bg-white">
+        <SimpleBracketList session={session} matches={matches} groups={groups} />
       </div>
     </div>
   );

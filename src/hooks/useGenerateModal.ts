@@ -259,6 +259,17 @@ export function useGenerateModal({
       return;
     }
 
+    // 같은 조가 여러 대결 쌍에 포함되면 같은 라운드에 이중 출전하게 됨 → 차단
+    const usedGroupIds = validPairs.flatMap(p => [p.groupAId, p.groupBId]);
+    const duplicatedIds = usedGroupIds.filter((id, i) => usedGroupIds.indexOf(id) !== i);
+    if (duplicatedIds.length > 0) {
+      const names = [...new Set(duplicatedIds)]
+        .map(id => groups.find(g => g.id === id)?.name ?? id)
+        .join(', ');
+      alert(`같은 조가 여러 대결 쌍에 포함되어 있습니다: ${names}\n한 조는 하나의 대결 쌍에만 배정할 수 있습니다.\n(같은 라운드에 선수가 두 코트에 동시 배정되는 것을 방지)`);
+      return;
+    }
+
     setShowGenerateModal(false);
 
     // stale React state(matches) 대신 DB에서 최신 경기 조회 후 삭제

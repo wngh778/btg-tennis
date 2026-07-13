@@ -465,7 +465,7 @@ export default function SuperAdminPage() {
                           </div>
                           {importSourceMembers.map(m => (
                             <label key={m.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50">
-                              <input type="checkbox" checked={importSelected.has(m.id)} onChange={e => { const s = new Set(importSelected); e.target.checked ? s.add(m.id) : s.delete(m.id); setImportSelected(s); }} className="rounded" />
+                              <input type="checkbox" checked={importSelected.has(m.id)} onChange={e => { const s = new Set(importSelected); if (e.target.checked) { s.add(m.id); } else { s.delete(m.id); } setImportSelected(s); }} className="rounded" />
                               <span className={`w-2 h-2 rounded-full ${m.gender === 'male' ? 'bg-blue-400' : 'bg-pink-400'}`} />
                               <span className="font-medium text-slate-800 flex-1">{m.name}</span>
                               <span className="text-xs text-slate-400">{m.gender === 'male' ? '남' : '여'} · {m.ntrp.toFixed(1)}</span>

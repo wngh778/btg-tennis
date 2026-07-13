@@ -27,6 +27,8 @@ export function ClubProvider({ children }: { children: ReactNode }) {
       // appUser가 없을 때만 클럽 초기화 (로그아웃 시)
       // 이미 클럽이 로드되어 있고 일시적인 null이면 유지
       if (!appUser) {
+        // 로그아웃 시 클럽 상태 초기화 — AuthContext(외부 상태)와의 동기화이므로 의도된 패턴
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setAvailableClubs([]);
         setCurrentClubState(null);
         prevAppUserIdRef.current = null;
@@ -78,6 +80,8 @@ export function ClubProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// context 파일에서 hook을 함께 export하는 표준 패턴 (fast refresh 경고 무시)
+// eslint-disable-next-line react-refresh/only-export-components
 export function useClub() {
   const ctx = useContext(ClubContext);
   if (!ctx) throw new Error('useClub must be used within ClubProvider');

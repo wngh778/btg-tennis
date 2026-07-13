@@ -136,9 +136,10 @@ export function MatchCard({
   const score2Ref = useRef<HTMLInputElement>(null);
 
   // match prop이 바뀌면 로컬 편집 상태 동기화
-  const prevMatchIdRef = useRef(match.id);
-  if (prevMatchIdRef.current !== match.id) {
-    prevMatchIdRef.current = match.id;
+  // (React 공식 "prop 변경 시 state 리셋" 패턴 — render 중 이전 값 비교)
+  const [prevMatchId, setPrevMatchId] = useState(match.id);
+  if (prevMatchId !== match.id) {
+    setPrevMatchId(match.id);
     setScore1(match.score1 || '');
     setScore2(match.score2 || '');
     setLocalScore1(null);

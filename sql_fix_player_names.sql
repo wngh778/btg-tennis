@@ -11,7 +11,7 @@ SELECT
   a.player_name AS stored_name,
   COUNT(*) AS record_count
 FROM attendance a
-JOIN members m ON m.id = a.player_id
+JOIN members m ON m.id = a.player_id::uuid
 WHERE a.player_type = 'member'
   AND a.player_name <> m.name
 GROUP BY a.player_id, m.name, a.player_name
@@ -21,7 +21,7 @@ ORDER BY m.name;
 UPDATE attendance a
 SET player_name = m.name
 FROM members m
-WHERE a.player_id = m.id
+WHERE a.player_id::uuid = m.id
   AND a.player_type = 'member'
   AND a.player_name <> m.name;
 

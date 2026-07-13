@@ -5,7 +5,6 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // 인메모리 락: 동일 탭 내 토큰 갱신 직렬화
 // Navigator.locks(기본)는 이전 탭이 stale lock을 남기는 문제가 있어 사용 불가
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const inMemoryLock = (() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const locks = new Map<string, Promise<any>>();

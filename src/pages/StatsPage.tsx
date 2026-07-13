@@ -26,6 +26,19 @@ interface CachedData {
 
 type SessionTypeFilter = 'all' | 'weekly' | 'quarterly';
 
+// 승점 체계: 승 +3 / 무 +1 / 패 0 (출석은 승점 미반영)
+const POINTS_WIN = 3;
+const POINTS_DRAW = 1;
+
+// 세션 타입 + 날짜 범위 필터 (드롭다운 목록과 통계 재계산에서 공용)
+function filterSessionList(sessions: Session[], typeFilter: SessionTypeFilter, from: string, to: string): Session[] {
+  let filtered = sessions;
+  if (typeFilter !== 'all') filtered = filtered.filter(s => s.type === typeFilter);
+  if (from) filtered = filtered.filter(s => s.date >= from);
+  if (to) filtered = filtered.filter(s => s.date <= to);
+  return filtered;
+}
+
 export default function StatsPage() {
   const { appUser, isAdminUser } = useAuth();
   const { currentClub, loadingClubs } = useClub();
@@ -86,32 +99,28 @@ export default function StatsPage() {
       const team2Players = [m.team2.player1, m.team2.player2];
 
       if (s1 > s2) {
-        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
+        team1Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += POINTS_WIN; });
         team2Players.forEach(p => { ensurePlayer(p.id).losses += 1; /* 패배: +0점 */ });
       } else if (s2 > s1) {
-        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += 3; });
+        team2Players.forEach(p => { const s = ensurePlayer(p.id); s.wins += 1; s.points += POINTS_WIN; });
         team1Players.forEach(p => { ensurePlayer(p.id).losses += 1; /* 패배: +0점 */ });
       } else {
         [...team1Players, ...team2Players].forEach(p => {
           const s = ensurePlayer(p.id);
           s.draws += 1;
-          s.points += 1; // 무승부: +1점
+          s.points += POINTS_DRAW;
         });
       }
     });
 
-    // 출석 가산점: 출석 1회당 +0.5점 (경기 결과와 별개로 출석 자체를 보상)
-    statMap.forEach((stat) => {
-      stat.points += stat.attendanceCount * 1;
-    });
-
+    // 출석은 승점에 반영하지 않음 (승 +3 / 무 +1 / 패 0 체계)
+    // 전체 보기에서는 경기 기록이 없어도 출석한 선수를 목록에 표시
     if (sessionId === 'all' && !filteredSessionIds) {
       attendanceCounts.forEach((count, playerId) => {
         if (!statMap.has(playerId)) {
           const info = playerInfo.get(playerId);
           if (info) {
-            const bonus = count * 1;
-            statMap.set(playerId, { id: playerId, name: info.name, gender: info.gender, wins: 0, draws: 0, losses: 0, points: bonus, attendanceCount: count });
+            statMap.set(playerId, { id: playerId, name: info.name, gender: info.gender, wins: 0, draws: 0, losses: 0, points: 0, attendanceCount: count });
           }
         }
       });
@@ -194,19 +203,9 @@ export default function StatsPage() {
   // 세션 타입 + 날짜 범위로 필터된 세션 목록
   const filteredSessions = useMemo(() => {
     if (!cachedData.current) return [];
-    let sessions = cachedData.current.sessions;
-
-    if (sessionTypeFilter !== 'all') {
-      sessions = sessions.filter(s => s.type === sessionTypeFilter);
-    }
-    if (dateFrom) {
-      sessions = sessions.filter(s => s.date >= dateFrom);
-    }
-    if (dateTo) {
-      sessions = sessions.filter(s => s.date <= dateTo);
-    }
-
-    return sessions;
+    return filterSessionList(cachedData.current.sessions, sessionTypeFilter, dateFrom, dateTo);
+    // cachedData는 ref지만 로드 완료 후 재계산이 필요해 의도적으로 deps에 포함
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cachedData.current?.sessions, sessionTypeFilter, dateFrom, dateTo]);
 
   // 필터가 활성화되어 있는지 여부
@@ -235,17 +234,7 @@ export default function StatsPage() {
     }
 
     // 필터된 세션 ID 집합
-    let filtered = sessions;
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(s => s.type === typeFilter);
-    }
-    if (from) {
-      filtered = filtered.filter(s => s.date >= from);
-    }
-    if (to) {
-      filtered = filtered.filter(s => s.date <= to);
-    }
-    const sessionIds = new Set(filtered.map(s => s.id));
+    const sessionIds = new Set(filterSessionList(sessions, typeFilter, from, to).map(s => s.id));
     computeStats(allMatches, playerInfo, attendanceCounts, 'all', sessionIds);
   }, [computeStats]);
 
@@ -468,7 +457,7 @@ export default function StatsPage() {
       </div>
 
       <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 text-xs text-slate-500">
-        승점: 승리 +3점 · 무승부 +1점 · 패배 0점 · 출석 +1점
+        승점: 승리 +3점 · 무승부 +1점 · 패배 0점
       </div>
     </div>
   );

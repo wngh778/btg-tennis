@@ -543,7 +543,12 @@ export function getNextDay(dayOfWeek: string = '일요일'): string {
   const daysUntil = current === target ? 7 : (target - current + 7) % 7;
   const next = new Date(today);
   next.setDate(today.getDate() + daysUntil);
-  return next.toISOString().split('T')[0];
+  // 로컬(한국) 날짜 기준 포맷 — toISOString()은 UTC 변환되어
+  // KST 오전 0~9시에 실행하면 날짜가 하루 밀리는 버그가 있었음
+  const y = next.getFullYear();
+  const m = String(next.getMonth() + 1).padStart(2, '0');
+  const d = String(next.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 export function getNextSunday(): string {
@@ -778,6 +783,19 @@ function combinations<T>(arr: T[], k: number): T[][] {
 }
 
 export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Match, 'id'>[] {
+  // 라운드별 그리디는 후반 라운드에서 막다른 길(중복 페어 불가피)에 빠질 수 있음
+  // → 스케줄 전체를 여러 번 생성해 중복 페어 최소 스케줄 선택 (1회 ~수 ms라 비용 미미)
+  const SCHEDULE_ATTEMPTS = 20;
+  let best: { matches: Omit<Match, 'id'>[]; repeats: number } | null = null;
+  for (let i = 0; i < SCHEDULE_ATTEMPTS; i++) {
+    const cand = buildMonthlySchedule(options);
+    if (!best || cand.repeats < best.repeats) best = cand;
+    if (best.repeats === 0) break;
+  }
+  return best?.matches ?? [];
+}
+
+function buildMonthlySchedule(options: MonthlyGenerateOptions): { matches: Omit<Match, 'id'>[]; repeats: number } {
   const { sessionId, players, courts, totalRounds } = options;
 
   // 파트너 페어 횟수 추적 (중복 페어 감지용)
@@ -792,11 +810,13 @@ export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Ma
   const gameCounts = new Map<string, number>(players.map(p => [p.id, 0]));
   const allMatches: Omit<Match, 'id'>[] = [];
 
-  for (let round = 1; round <= totalRounds; round++) {
-    const activeCourts = Math.min(courts, Math.floor(players.length / 4));
-    if (activeCourts === 0) continue;
-
+  // 한 라운드 전체를 그리디로 편성 시도 (전역 상태 변경 없음 — 시뮬레이션)
+  // 라운드 내에서는 코트끼리 선수가 겹치지 않으므로 pairCount/gameCounts는 라운드 중 불변
+  const tryBuildRound = (): { teams: [[Player, Player], [Player, Player]][]; repeatPenalty: number } => {
     const usedInRound = new Set<string>();
+    const teams: [[Player, Player], [Player, Player]][] = [];
+    let repeatPenalty = 0;
+    const activeCourts = Math.min(courts, Math.floor(players.length / 4));
 
     for (let c = 0; c < activeCourts; c++) {
       // 이번 라운드 미배정 선수 (게임수 적은 순 + 랜덤 타이브레이크)
@@ -809,8 +829,9 @@ export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Ma
 
       if (available.length < 4) continue;
 
-      // 후보 상한: C(8,4)=70, C(10,4)=210 — 충분히 빠름
-      const candidateLimit = Math.min(available.length, 8);
+      // 후보 상한: C(12,4)=495 — 충분히 빠름
+      // 8명으로 제한하면 후보 내 조합만으로 중복 페어가 불가피해지는 케이스 발생 → 12명으로 확대
+      const candidateLimit = Math.min(available.length, 12);
       const candidates = available.slice(0, candidateLimit);
       const combos = combinations(candidates, 4);
 
@@ -854,10 +875,31 @@ export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Ma
       }
 
       const [[t1p1, t1p2], [t2p1, t2p2]] = bestCfg;
+      [t1p1, t1p2, t2p1, t2p2].forEach(p => usedInRound.add(p.id));
+      repeatPenalty += getPairCount(t1p1, t1p2) + getPairCount(t2p1, t2p2);
+      teams.push([[t1p1, t1p2], [t2p1, t2p2]]);
+    }
 
+    return { teams, repeatPenalty };
+  };
+
+  // 코트 순서 그리디는 라운드 전체 최적을 놓칠 수 있음 (앞 코트가 좋은 페어를 선점)
+  // → 라운드 단위로 여러 번 시도해 중복 페어 최소 조합 선택 (검증에서 실패율 대폭 감소 확인)
+  const ROUND_ATTEMPTS = 30;
+
+  for (let round = 1; round <= totalRounds; round++) {
+    if (Math.min(courts, Math.floor(players.length / 4)) === 0) continue;
+
+    let best = tryBuildRound();
+    for (let attempt = 1; attempt < ROUND_ATTEMPTS && best.repeatPenalty > 0; attempt++) {
+      const cand = tryBuildRound();
+      if (cand.repeatPenalty < best.repeatPenalty) best = cand;
+    }
+
+    // 확정: 전역 기록 갱신 + 경기 추가
+    best.teams.forEach(([[t1p1, t1p2], [t2p1, t2p2]], i) => {
       [t1p1, t1p2, t2p1, t2p2].forEach(p => {
         gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1);
-        usedInRound.add(p.id);
       });
       incPairCount(t1p1, t1p2);
       incPairCount(t2p1, t2p2);
@@ -867,16 +909,18 @@ export function generateMonthlyMatches(options: MonthlyGenerateOptions): Omit<Ma
       const matchType: MatchType = maleCnt === 4 ? 'male' : maleCnt === 0 ? 'female' : 'mixed';
 
       allMatches.push({
-        sessionId, round, court: c + 1,
+        sessionId, round, court: i + 1,
         matchType,
         team1: { player1: t1p1, player2: t1p2 },
         team2: { player1: t2p1, player2: t2p2 },
         isCompleted: false,
       });
-    }
+    });
   }
 
-  return allMatches;
+  // 중복 페어 수 = 같은 페어가 2회 이상 편성된 건수 (초과분 합산)
+  const repeats = [...pairCount.values()].reduce((s, v) => s + Math.max(0, v - 1), 0);
+  return { matches: allMatches, repeats };
 }
 
 // ─── 조간 대진: 서로 다른 조끼리 대결 ─────────────────────────────────────────

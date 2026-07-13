@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { getAppUser, usernameToEmail, createAppUser } from '../lib/database';
 import type { AppUser } from '../types';
 
 interface AuthContextType {
-  user: any | null; // supabase session user
+  user: User | null; // supabase session user
   isAdminUser: boolean;
   isSuperAdmin: boolean;
   appUser: AppUser | null;
@@ -17,18 +18,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // refs로 최신 상태를 클로저에서 참조 (onAuthStateChange 콜백 내 stale closure 방지)
-  const userRef = useRef<any | null>(null);
+  const userRef = useRef<User | null>(null);
   const appUserRef = useRef<AppUser | null>(null);
   const loadingUserRef = useRef<string | null>(null);
 
-  const setUserWithRef = useCallback((u: any | null) => {
+  const setUserWithRef = useCallback((u: User | null) => {
     userRef.current = u;
     setUser(u);
   }, []);
@@ -160,6 +161,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// context 파일에서 hook을 함께 export하는 표준 패턴 (fast refresh 경고 무시)
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
