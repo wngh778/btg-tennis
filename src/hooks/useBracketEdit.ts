@@ -504,16 +504,35 @@ export function useBracketEdit({
   const handleSubstitute = (replacementPlayer: Player) => {
     if (!substituteTarget) return;
     pushUndo();
-    const newPending = pendingMatches.map(m => {
-      if (m.id !== substituteTarget.matchId) return m;
-      const updated = {
-        ...m,
-        team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
-        team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
-      };
-      updated[substituteTarget.team][substituteTarget.slot] = replacementPlayer;
-      return updated;
-    });
+    const newPending: Match[] = pendingMatches.map(m => ({
+      ...m,
+      team1: { ...m.team1, player1: { ...m.team1.player1 }, player2: { ...m.team1.player2 } },
+      team2: { ...m.team2, player1: { ...m.team2.player1 }, player2: { ...m.team2.player2 } },
+    }));
+    const tgtMatch = newPending.find(m => m.id === substituteTarget.matchId);
+    if (!tgtMatch) { setSubstituteTarget(null); return; }
+    const outgoing = tgtMatch[substituteTarget.team][substituteTarget.slot];
+
+    // 교체 선수가 같은 라운드에 이미 배정돼 있으면 두 선수 자리를 맞교환
+    // (예: 이경태 자리에 김현준 선택 → 김현준의 원래 자리에 이경태가 들어감)
+    // 후보(미배정) 선수를 데려오는 경우는 해당 없음 → 단순 교체
+    const teams = ['team1', 'team2'] as const;
+    const slots = ['player1', 'player2'] as const;
+    swapSearch: for (const m of newPending) {
+      if (m.round !== tgtMatch.round) continue;
+      for (const team of teams) {
+        for (const slot of slots) {
+          // 교체 대상 슬롯 자신은 제외
+          if (m.id === substituteTarget.matchId && team === substituteTarget.team && slot === substituteTarget.slot) continue;
+          if (m[team][slot].id === replacementPlayer.id) {
+            m[team][slot] = outgoing;
+            break swapSearch;
+          }
+        }
+      }
+    }
+
+    tgtMatch[substituteTarget.team][substituteTarget.slot] = replacementPlayer;
     setPendingMatches(newPending);
     setSubstituteTarget(null);
     autoSave(newPending, deletedMatchIds, pendingRoundsCount);

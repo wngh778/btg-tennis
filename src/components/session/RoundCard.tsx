@@ -638,10 +638,12 @@ export function RoundCard({
             />
           ))}
           {editMode && onAddMatch && (
-            <div className="px-5 py-3 flex justify-center">
+            // 모바일 점수 입력(카드 중앙) 직후 오터치 방지:
+            // 중앙 정렬 대신 우측 끝 + 배경 스트립으로 시각 분리 + 작은 보조 버튼 스타일
+            <div className="px-5 py-2 flex justify-end bg-slate-50/60">
               <button
                 onClick={() => onAddMatch(round)}
-                className="px-4 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-300 text-xs rounded-lg hover:bg-emerald-100 font-medium transition-colors"
+                className="px-2.5 py-1 text-[11px] text-slate-400 border border-dashed border-slate-300 rounded-lg font-medium transition-colors hover:text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50"
               >
                 + 경기 추가
               </button>
