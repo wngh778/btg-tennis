@@ -67,6 +67,7 @@ export interface AttendanceRecord {
   ntrp: number;
   attending: boolean;
   isLate?: boolean; // 지각 여부 (true=지각, false=정시, undefined=미응답)
+  arrivalOrder?: number; // 도착 순서 (1=첫 번째, 2=두 번째, ..., null=미설정)
   updatedAt: Date;
 }
 

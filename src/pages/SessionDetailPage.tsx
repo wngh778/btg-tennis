@@ -2,9 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
-  setAttendance,
+  setAttendance, setArrivalOrder, deleteAttendance,
   getMatches, updateMatchScore, updateSession, updateMatch,
-  getSessionGroups, deleteMatch, saveMatches,
+  getSessionGroups, deleteMatch, insertMatch, saveMatches,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
 import { useClub } from '../contexts/ClubContext';
@@ -53,6 +53,8 @@ export default function SessionDetailPage() {
   });
   const [groups, setGroups] = useState<SessionGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  // 참석인원 상세 탭 — 게스트 포함 토글 (탭 전환 시에도 유지)
+  const [showDetailGuests, setShowDetailGuests] = useState(false);
 
   // Team Setup 모달 (소규모 — 페이지에 유지)
   const [showTeamSetup, setShowTeamSetup] = useState(false);
@@ -121,6 +123,34 @@ export default function SessionDetailPage() {
   // ── 커스텀 훅 (React Rules of Hooks: early return 앞에 위치) ───────────────
   const bracketEdit = useBracketEdit({ matches, session, attendingPlayers, load });
   const guestForm = useGuestForm({ session, matches, isAdminUser, load });
+  // 도착순 1라운드 생성 (UI 부수효과 없음 — useGenerateModal 내에서 호출됨)
+  const generateArrivalRound1 = async () => {
+    if (!session) return;
+    const sorted = attendance
+      .filter(a => a.attending && a.arrivalOrder != null)
+      .sort((a, b) => a.arrivalOrder! - b.arrivalOrder!);
+    if (sorted.length < 4) return;
+    const getPlayer = (rec: AttendanceRecord): Player => {
+      const member = members.find(m => m.id === rec.playerId);
+      return { id: rec.playerId, name: member?.name ?? rec.playerName, gender: rec.gender, ntrp: rec.ntrp, type: rec.playerType as 'member' | 'guest' };
+    };
+    const [p1, p2, p3, p4] = [sorted[0], sorted[1], sorted[2], sorted[3]].map(getPlayer);
+    const all = [p1, p2, p3, p4];
+    const hasMale = all.some(p => p.gender === 'male');
+    const hasFemale = all.some(p => p.gender === 'female');
+    const matchType: MatchType = !hasFemale ? 'male' : !hasMale ? 'female' : 'mixed';
+    const round1Match: Omit<Match, 'id'> = {
+      sessionId: session.id, round: 1, court: 1, matchType,
+      team1: { player1: p1, player2: p2 }, team2: { player1: p3, player2: p4 },
+      score1: undefined, score2: undefined, isCompleted: false,
+    };
+    // 기존 1라운드 삭제 후 새 1라운드 삽입 (load()는 이후 doGenerate에서 일괄 처리)
+    const currentRound1 = matches.filter(m => m.round === 1);
+    for (const m of currentRound1) await deleteMatch(m.id);
+    await insertMatch(round1Match);
+    await updateSession(session.id, { isGenerated: true });
+  };
+
   const generateModal = useGenerateModal({
     session,
     attendingPlayers,
@@ -133,6 +163,7 @@ export default function SessionDetailPage() {
     setMatches,
     setSession,
     setSelectedGroupId,
+    arrivalRound1Handler: generateArrivalRound1,
   });
 
   // 훅 반환값 구조분해
@@ -192,6 +223,7 @@ export default function SessionDetailPage() {
     manualSlots, setManualSlots,
     generateCrossGroup, setGenerateCrossGroup,
     crossGroupPairs, setCrossGroupPairs,
+    useArrivalFirstRound, setUseArrivalFirstRound,
     handleGenerateClick, doGenerate, handleGenerate,
     handleAiRecommend, handleMonthlyGenerate, handleMondayClick, handleMondayGenerate,
     handleFixedPairGenerate, handleManualTogglePlayer, handleManualSave,
@@ -224,6 +256,13 @@ export default function SessionDetailPage() {
   // ── Voting 핸들러 ─────────────────────────────────────────────────────────
   const handleMemberVote = async (member: Member, attending: boolean) => {
     if (!canVote) return;
+    const rec = attendance.find(a => a.playerId === member.id);
+    // 같은 버튼 재클릭 → 투표 취소 (미응답 상태로 되돌림)
+    if (rec?.attending === attending) {
+      await deleteAttendance(session.id, member.id, isAdminUser);
+      load();
+      return;
+    }
     await setAttendance({
       sessionId: session.id,
       playerId: member.id,
@@ -258,6 +297,49 @@ export default function SessionDetailPage() {
       playerName: guest.name, gender: guest.gender, ntrp: guest.ntrp,
       attending: true, isLate,
     }, isAdminUser);
+    load();
+  };
+
+  // 도착 순위 설정 (관리자 전용)
+  // order === null 이면 해당 선수 순위 삭제 후 이후 순위를 1씩 당김 (cascade)
+  const handleArrivalOrder = async (playerId: string, _playerType: 'member' | 'guest', order: number | null) => {
+    if (!isAdminUser) return;
+    const rec = attendance.find(a => a.playerId === playerId);
+    if (!rec || !rec.attending) return;
+
+    if (order === null) {
+      const currentRank = rec.arrivalOrder;
+      // 먼저 해당 선수 순위 초기화
+      await setArrivalOrder(session.id, playerId, null);
+      // 삭제된 순위보다 높은 순위의 선수들 순위를 1씩 당김
+      if (currentRank != null) {
+        const toDecrement = attendance.filter(
+          a => a.attending && a.arrivalOrder != null && a.arrivalOrder > currentRank && a.playerId !== playerId
+        );
+        for (const a of toDecrement) {
+          await setArrivalOrder(session.id, a.playerId, a.arrivalOrder! - 1);
+        }
+      }
+    } else {
+      await setArrivalOrder(session.id, playerId, order);
+    }
+    load();
+  };
+
+  // 도착 순위 위아래 교환 (관리자 전용)
+  const handleSwapArrival = async (playerId: string, _playerType: 'member' | 'guest', direction: 'up' | 'down') => {
+    if (!isAdminUser) return;
+    const rec = attendance.find(a => a.playerId === playerId);
+    if (!rec || !rec.attending || rec.arrivalOrder == null) return;
+
+    const currentRank = rec.arrivalOrder;
+    const targetRank = direction === 'up' ? currentRank - 1 : currentRank + 1;
+    const swapRec = attendance.find(a => a.attending && a.arrivalOrder === targetRank);
+    if (!swapRec) return; // 교환할 대상 없음 (경계)
+
+    // 두 선수의 순위 교환
+    await setArrivalOrder(session.id, playerId, targetRank);
+    await setArrivalOrder(session.id, swapRec.playerId, currentRank);
     load();
   };
 
@@ -517,6 +599,8 @@ export default function SessionDetailPage() {
           handleMemberVote={handleMemberVote}
           handleMemberLate={handleMemberLate}
           handleGuestLate={handleGuestLate}
+          handleArrivalOrder={handleArrivalOrder}
+          handleSwapArrival={handleSwapArrival}
         />
       )}
 
@@ -596,7 +680,13 @@ export default function SessionDetailPage() {
 
       {/* ── 참석인원 상세 탭 ─────────────────────────────────────────────── */}
       {tab === 'detail' && (
-        <PlayerDetailTab attendingPlayers={attendingPlayers} matches={matches} showNtrp={isAdminUser} />
+        <PlayerDetailTab
+          attendingPlayers={attendingPlayers}
+          matches={matches}
+          showNtrp={isAdminUser}
+          showGuests={showDetailGuests}
+          setShowGuests={setShowDetailGuests}
+        />
       )}
 
       {/* ── 결과 탭 ──────────────────────────────────────────────────────── */}
@@ -619,6 +709,9 @@ export default function SessionDetailPage() {
           isSuperAdmin={isSuperAdmin}
           currentClubName={currentClub?.name}
           gameMode={session.gameMode}
+          arrivalOrderCount={attendance.filter(a => a.attending && a.arrivalOrder != null).length}
+          useArrivalFirstRound={useArrivalFirstRound}
+          setUseArrivalFirstRound={setUseArrivalFirstRound}
           onClose={() => setShowModeModal(false)}
           onSelectNormal={() => { setShowModeModal(false); handleGenerateClick(); }}
           onSelectMonthly={() => { handleMonthlyGenerate(); }}

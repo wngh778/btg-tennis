@@ -239,11 +239,25 @@ export interface GenerateOptions {
   pastMatches: Match[];
   latePlayerIds?: Set<string>; // 지각자 ID 집합 - 1라운드 제외
   strategy?: PairingStrategy; // 기본값: 'no-repeat-pair'
+  // 도착 순위 1~4위 선수: 제공 시 1라운드 코트1에 수기 배치 (1,2 vs 3,4)
+  firstRoundPlayers?: [Player, Player, Player, Player];
+  // 외부에서 시작 라운드 지정 (도착순 1라운드가 이미 DB에 저장된 경우 2부터 이어서 생성)
+  startRound?: number;
+}
+
+// 두 팀의 성별 조합으로 MatchType 결정
+function determineMatchType(team1Players: Player[], team2Players: Player[]): MatchType {
+  const all = [...team1Players, ...team2Players];
+  const hasMale = all.some(p => p.gender === 'male');
+  const hasFemale = all.some(p => p.gender === 'female');
+  if (!hasFemale) return 'male';
+  if (!hasMale) return 'female';
+  return 'mixed';
 }
 
 export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const { sessionId, courts, totalRounds, mixedRounds, mixedLast = false, sessionType, pastMatches } = options;
-  const { players, latePlayerIds = new Set<string>(), strategy = 'no-repeat-pair' } = options;
+  const { players, latePlayerIds = new Set<string>(), strategy = 'no-repeat-pair', firstRoundPlayers } = options;
 
   const history = buildHistory(pastMatches);
   const allMatches: Omit<Match, 'id'>[] = [];
@@ -255,8 +269,28 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const gameCounts = new Map<string, number>();
   players.forEach(p => gameCounts.set(p.id, 0));
 
-  // 연속경기 제거 전략용: 이전 라운드에 경기한 선수 ID 추적
+  // ── 도착순 1라운드 수기 편성 ────────────────────────────────────────────────
+  // firstRoundPlayers가 제공되면 1라운드 코트1에 도착 1,2위 vs 3,4위 배치
+  // options.startRound가 지정되면 그 라운드부터 자동 생성 (DB에 이미 1라운드가 있을 때)
+  let startRound = options.startRound ?? 1;
   let lastRoundPlayedSet = new Set<string>();
+  if (firstRoundPlayers && firstRoundPlayers.length === 4) {
+    const [p1, p2, p3, p4] = firstRoundPlayers;
+    const mt = determineMatchType([p1, p2], [p3, p4]);
+    allMatches.push({
+      sessionId, round: 1, court: 1,
+      matchType: mt,
+      team1: { player1: p1, player2: p2 },
+      team2: { player1: p3, player2: p4 },
+      isCompleted: false,
+    });
+    // 페어/대전 히스토리에 반영 (이후 라운드에서 중복 방지)
+    updateHistory(history, [{ team1: { player1: p1, player2: p2 }, team2: { player1: p3, player2: p4 } }]);
+    // 게임 횟수 반영 (이후 라운드에서 이 선수들이 후순위로 배정됨)
+    [p1, p2, p3, p4].forEach(p => gameCounts.set(p.id, 1));
+    lastRoundPlayedSet = new Set([p1.id, p2.id, p3.id, p4.id]);
+    startRound = 2; // 자동 생성은 2라운드부터
+  }
 
   // 게임 횟수 적은 순 정렬 (동점이면 랜덤), 1라운드는 지각자 후순위
   const byLeastGames = (arr: Player[], round: number): Player[] =>
@@ -284,7 +318,7 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   const addGames = (ps: Player[]) =>
     ps.forEach(p => gameCounts.set(p.id, (gameCounts.get(p.id) || 0) + 1));
 
-  for (let round = 1; round <= totalRounds; round++) {
+  for (let round = startRound; round <= totalRounds; round++) {
     const roundMatches: Array<{ team1: Team; team2: Team; matchType: MatchType; court: number }> = [];
     let courtNum = 1;
     // 이번 라운드에 경기한 선수 추적 (연속경기 제거 전략용)
@@ -387,11 +421,14 @@ export function generateMatches(options: GenerateOptions): Omit<Match, 'id'>[] {
   // DB에 [1, 3, 5] 같은 갭이 생김 → 1부터 연속 번호로 재번호
   if (allMatches.length === 0) return allMatches;
   const uniqueRounds = [...new Set(allMatches.map(m => m.round))].sort((a, b) => a - b);
-  if (uniqueRounds.length === uniqueRounds[uniqueRounds.length - 1]) {
-    // 이미 1부터 연속 번호 → 그대로 반환
+  const expectedStart = uniqueRounds[0]; // 실제 시작 라운드 (startRound가 2이면 2)
+  const expectedCount = uniqueRounds[uniqueRounds.length - 1] - expectedStart + 1;
+  if (uniqueRounds.length === expectedCount) {
+    // 이미 expectedStart부터 연속 번호 → 그대로 반환
     return allMatches;
   }
-  const roundRemap = new Map(uniqueRounds.map((r, i) => [r, i + 1]));
+  // 갭이 있는 경우: expectedStart부터 연속 번호로 재번호 (startRound 오프셋 유지)
+  const roundRemap = new Map(uniqueRounds.map((r, i) => [r, expectedStart + i]));
   return allMatches.map(m => ({ ...m, round: roundRemap.get(m.round) ?? m.round }));
 }
 

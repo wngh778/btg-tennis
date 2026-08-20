@@ -248,6 +248,7 @@ function rowToAttendance(row: Record<string, unknown>): AttendanceRecord {
     ntrp: row.ntrp as number,
     attending: row.attending as boolean,
     isLate: row.is_late as boolean | undefined,
+    arrivalOrder: row.arrival_order != null ? (row.arrival_order as number) : undefined,
     updatedAt: new Date(row.updated_at as string),
   };
 }
@@ -274,9 +275,20 @@ export async function setAttendance(data: Omit<AttendanceRecord, 'id' | 'updated
     updated_at: new Date().toISOString(),
   };
   if (data.isLate !== undefined) upsertData.is_late = data.isLate;
+  if (data.arrivalOrder !== undefined) upsertData.arrival_order = data.arrivalOrder ?? null;
   const { error } = await client
     .from('attendance')
     .upsert(upsertData, { onConflict: 'session_id,player_id' });
+  if (error) throw error;
+}
+
+// 도착 순위만 단독 업데이트 (null = 초기화)
+export async function setArrivalOrder(sessionId: string, playerId: string, order: number | null): Promise<void> {
+  const { error } = await (supabaseAdmin ?? supabase)
+    .from('attendance')
+    .update({ arrival_order: order })
+    .eq('session_id', sessionId)
+    .eq('player_id', playerId);
   if (error) throw error;
 }
 

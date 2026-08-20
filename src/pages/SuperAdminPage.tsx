@@ -26,6 +26,24 @@ export default function SuperAdminPage() {
   const [editClub, setEditClub] = useState<Club | null>(null);
   const [clubSaving, setClubSaving] = useState(false);
 
+  // Quick-setup wizard (새 클럽 + 관리자 한 번에)
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<1 | 2>(1);
+  const [wizardClubName, setWizardClubName] = useState('');
+  const [wizardClubDay, setWizardClubDay] = useState('일요일');
+  const [wizardClubCourts, setWizardClubCourts] = useState(4);
+  const [wizardClubColor, setWizardClubColor] = useState('#15803d');
+  const [wizardCreatedClubId, setWizardCreatedClubId] = useState('');
+  const [wizardCreatedClubName, setWizardCreatedClubName] = useState('');
+  const [wizardAdminMode, setWizardAdminMode] = useState<'existing' | 'new'>('existing');
+  const [wizardSearchName, setWizardSearchName] = useState('');
+  const [wizardFoundUser, setWizardFoundUser] = useState<AppUser | null | undefined>(undefined);
+  const [wizardNewAdminName, setWizardNewAdminName] = useState('');
+  const [wizardNewAdminPassword, setWizardNewAdminPassword] = useState('');
+  const [wizardSaving, setWizardSaving] = useState(false);
+  const [wizardError, setWizardError] = useState('');
+  const [wizardDone, setWizardDone] = useState(false);
+
   // Bulk create
   const [bulkClubId, setBulkClubId] = useState('');
   const [bulkCreating, setBulkCreating] = useState(false);
@@ -252,12 +270,298 @@ export default function SuperAdminPage() {
     await deleteAppUser(u.id); load();
   };
 
+  // --- Quick-setup wizard handlers ---
+  const openWizard = () => {
+    setShowWizard(true); setWizardStep(1); setWizardDone(false);
+    setWizardClubName(''); setWizardClubDay('일요일'); setWizardClubCourts(4); setWizardClubColor('#15803d');
+    setWizardCreatedClubId(''); setWizardCreatedClubName('');
+    setWizardAdminMode('existing'); setWizardSearchName(''); setWizardFoundUser(undefined);
+    setWizardNewAdminName(''); setWizardNewAdminPassword(''); setWizardError('');
+  };
+
+  const handleWizardStep1 = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWizardSaving(true); setWizardError('');
+    try {
+      const clubId = await addClub({ name: wizardClubName.trim(), defaultCourts: wizardClubCourts, color: wizardClubColor, dayOfWeek: wizardClubDay });
+      setWizardCreatedClubId(clubId);
+      setWizardCreatedClubName(wizardClubName.trim());
+      setWizardStep(2);
+      await load();
+    } catch (err: unknown) {
+      setWizardError(err instanceof Error ? err.message : '클럽 생성 실패');
+    } finally { setWizardSaving(false); }
+  };
+
+  const handleWizardSearchUser = () => {
+    const name = wizardSearchName.trim();
+    if (!name) { setWizardFoundUser(undefined); return; }
+    const found = appUsers.find(u => u.username === name);
+    setWizardFoundUser(found ?? null);
+  };
+
+  const handleWizardAssignExisting = async () => {
+    if (!wizardFoundUser || !wizardCreatedClubId) return;
+    setWizardSaving(true); setWizardError('');
+    try {
+      const newClubIds = wizardFoundUser.clubIds.includes(wizardCreatedClubId)
+        ? wizardFoundUser.clubIds
+        : [...wizardFoundUser.clubIds, wizardCreatedClubId];
+      await updateAppUser(wizardFoundUser.id, { role: 'admin', clubIds: newClubIds, defaultClubId: wizardCreatedClubId });
+      await load();
+      setWizardDone(true);
+    } catch (err: unknown) {
+      setWizardError(err instanceof Error ? err.message : '관리자 지정 실패');
+    } finally { setWizardSaving(false); }
+  };
+
+  const handleWizardCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!wizardCreatedClubId) return;
+    const name = wizardNewAdminName.trim();
+    if (!name) { setWizardError('이름을 입력해주세요.'); return; }
+    if (appUsers.find(u => u.username === name)) {
+      setWizardError(`"${name}" 계정이 이미 존재합니다. 기존 계정 탭을 이용해주세요.`); return;
+    }
+    setWizardSaving(true); setWizardError('');
+    try {
+      const tempClient = makeTempClient();
+      const { data, error: signUpError } = await tempClient.auth.signUp({
+        email: usernameToEmail(name), password: wizardNewAdminPassword, options: { emailRedirectTo: undefined },
+      });
+      if (signUpError) throw signUpError;
+      if (!data.user) throw new Error('user null');
+      const { error: insertError } = await tempClient.from('app_users').insert({
+        id: data.user.id, username: name, role: 'admin',
+        club_ids: [wizardCreatedClubId], default_club_id: wizardCreatedClubId,
+      });
+      if (insertError) throw insertError;
+      await load();
+      setWizardDone(true);
+    } catch (err: unknown) {
+      setWizardError(err instanceof Error ? err.message : '계정 생성 실패');
+    } finally { setWizardSaving(false); }
+  };
+
   if (loading || loadingData) return <div className="text-center py-16 text-slate-500">불러오는 중...</div>;
   if (!isSuperAdmin) return null;
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-slate-800">슈퍼관리자</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-slate-800">슈퍼관리자</h1>
+        <button
+          onClick={openWizard}
+          className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm rounded-xl font-medium hover:bg-green-700 transition-colors shadow-sm"
+        >
+          <span className="text-base">⚡</span>
+          새 클럽 + 관리자 설정
+        </button>
+      </div>
+
+      {/* Quick-setup wizard modal */}
+      {showWizard && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-800">
+                    {wizardDone ? '✅ 설정 완료!' : wizardStep === 1 ? '1단계: 클럽 정보' : '2단계: 관리자 지정'}
+                  </h3>
+                  {!wizardDone && (
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {wizardStep === 1 ? '새 클럽 정보를 입력하세요.' : `"${wizardCreatedClubName}" 클럽에 관리자를 지정하세요.`}
+                    </p>
+                  )}
+                </div>
+                <button onClick={() => setShowWizard(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+              </div>
+              {/* Progress dots */}
+              {!wizardDone && (
+                <div className="flex gap-1.5 mt-3">
+                  <div className={`h-1.5 flex-1 rounded-full transition-colors ${wizardStep >= 1 ? 'bg-green-500' : 'bg-slate-200'}`} />
+                  <div className={`h-1.5 flex-1 rounded-full transition-colors ${wizardStep >= 2 ? 'bg-green-500' : 'bg-slate-200'}`} />
+                </div>
+              )}
+            </div>
+
+            {wizardDone ? (
+              /* Done screen */
+              <div className="px-6 py-8 text-center space-y-4">
+                <div className="text-5xl">🎉</div>
+                <div>
+                  <p className="font-semibold text-slate-800">"{wizardCreatedClubName}" 클럽이 생성되었습니다.</p>
+                  <p className="text-sm text-slate-500 mt-1">관리자가 로그인하면 해당 클럽을 관리할 수 있습니다.</p>
+                </div>
+                <div className="flex gap-2 justify-center">
+                  <button onClick={openWizard} className="px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 font-medium">
+                    또 설정하기
+                  </button>
+                  <button onClick={() => setShowWizard(false)} className="px-4 py-2 bg-slate-100 text-slate-700 text-sm rounded-xl hover:bg-slate-200 font-medium">
+                    닫기
+                  </button>
+                </div>
+              </div>
+            ) : wizardStep === 1 ? (
+              /* Step 1: Club info */
+              <form onSubmit={handleWizardStep1} className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">클럽 이름 *</label>
+                  <input
+                    value={wizardClubName}
+                    onChange={e => setWizardClubName(e.target.value)}
+                    required
+                    placeholder="예) 신종언 클럽"
+                    className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">요일</label>
+                    <select value={wizardClubDay} onChange={e => setWizardClubDay(e.target.value)} className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                      {['월요일','화요일','수요일','목요일','금요일','토요일','일요일'].map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">코트 수</label>
+                    <select value={wizardClubCourts} onChange={e => setWizardClubCourts(parseInt(e.target.value))} className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                      {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n}코트</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">클럽 색상</label>
+                  <div className="flex items-center gap-3">
+                    <input type="color" value={wizardClubColor} onChange={e => setWizardClubColor(e.target.value)} className="w-10 h-10 rounded-xl cursor-pointer border border-slate-300" />
+                    <span className="text-sm text-slate-500">{wizardClubColor}</span>
+                  </div>
+                </div>
+                {wizardError && <p className="text-red-500 text-sm">{wizardError}</p>}
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowWizard(false)} className="flex-1 py-2.5 text-sm text-slate-600 hover:text-slate-800 border border-slate-200 rounded-xl">취소</button>
+                  <button type="submit" disabled={wizardSaving} className="flex-1 py-2.5 bg-green-600 text-white text-sm rounded-xl font-medium hover:bg-green-700 disabled:opacity-50">
+                    {wizardSaving ? '생성 중...' : '클럽 생성 →'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Step 2: Assign admin */
+              <div className="px-6 py-5 space-y-4">
+                {/* Tab switcher */}
+                <div className="flex rounded-xl border border-slate-200 overflow-hidden">
+                  <button
+                    onClick={() => { setWizardAdminMode('existing'); setWizardSearchName(''); setWizardFoundUser(undefined); setWizardError(''); }}
+                    className={`flex-1 py-2 text-sm font-medium transition-colors ${wizardAdminMode === 'existing' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    기존 계정 검색
+                  </button>
+                  <button
+                    onClick={() => { setWizardAdminMode('new'); setWizardFoundUser(undefined); setWizardError(''); }}
+                    className={`flex-1 py-2 text-sm font-medium transition-colors ${wizardAdminMode === 'new' ? 'bg-green-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    새 계정 생성
+                  </button>
+                </div>
+
+                {wizardAdminMode === 'existing' ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-500">이미 앱 계정이 있는 사용자를 관리자로 지정합니다.</p>
+                    <div className="flex gap-2">
+                      <input
+                        value={wizardSearchName}
+                        onChange={e => { setWizardSearchName(e.target.value); setWizardFoundUser(undefined); }}
+                        onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleWizardSearchUser())}
+                        placeholder="아이디(이름) 입력"
+                        className="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                      <button type="button" onClick={handleWizardSearchUser} className="px-4 py-2 bg-slate-700 text-white text-sm rounded-xl hover:bg-slate-800 whitespace-nowrap">
+                        검색
+                      </button>
+                    </div>
+                    {wizardFoundUser === null && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-600">
+                        "{wizardSearchName}" 계정을 찾을 수 없습니다. 새 계정 생성 탭을 이용해주세요.
+                      </div>
+                    )}
+                    {wizardError && wizardFoundUser !== null && <p className="text-red-500 text-sm">{wizardError}</p>}
+                    {wizardFoundUser && (
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-700 font-bold text-sm">
+                            {wizardFoundUser.username[0]}
+                          </div>
+                          <div>
+                            <p className="font-medium text-slate-800">{wizardFoundUser.username}</p>
+                            <p className="text-xs text-slate-500">
+                              현재 역할: {{'superadmin':'슈퍼관리자','admin':'관리자','member':'회원'}[wizardFoundUser.role]}
+                              {wizardFoundUser.clubIds.length > 0 && ` · ${wizardFoundUser.clubIds.length}개 클럽 소속`}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-600 bg-white rounded-lg px-3 py-2 border border-green-200">
+                          "{wizardCreatedClubName}" 클럽의 <span className="font-semibold text-purple-600">관리자</span>로 지정됩니다.
+                        </p>
+                        <button
+                          onClick={handleWizardAssignExisting}
+                          disabled={wizardSaving}
+                          className="w-full py-2.5 bg-green-600 text-white text-sm rounded-xl font-medium hover:bg-green-700 disabled:opacity-50"
+                        >
+                          {wizardSaving ? '지정 중...' : '관리자로 지정'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <form onSubmit={handleWizardCreateAdmin} className="space-y-3">
+                    <p className="text-xs text-slate-500">새 관리자 계정을 생성합니다. 아이디 = 이름으로 설정됩니다.</p>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">이름 (아이디) *</label>
+                      <input
+                        value={wizardNewAdminName}
+                        onChange={e => setWizardNewAdminName(e.target.value)}
+                        required
+                        placeholder="예) 신종언"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">비밀번호 *</label>
+                      <input
+                        type="password"
+                        value={wizardNewAdminPassword}
+                        onChange={e => setWizardNewAdminPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        placeholder="최소 6자리"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                    <div className="bg-purple-50 border border-purple-200 rounded-xl px-3 py-2.5 text-xs text-purple-700">
+                      역할: <span className="font-semibold">관리자</span> · 클럽: <span className="font-semibold">{wizardCreatedClubName}</span>
+                    </div>
+                    {wizardError && <p className="text-red-500 text-sm">{wizardError}</p>}
+                    <button type="submit" disabled={wizardSaving || wizardNewAdminPassword.length < 6} className="w-full py-2.5 bg-green-600 text-white text-sm rounded-xl font-medium hover:bg-green-700 disabled:opacity-50">
+                      {wizardSaving ? '생성 중...' : '관리자 계정 생성'}
+                    </button>
+                  </form>
+                )}
+
+                {/* Skip option */}
+                <div className="pt-1 border-t border-slate-100 text-center">
+                  <button
+                    onClick={() => { setWizardDone(true); }}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    관리자 지정 없이 완료 →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* --- 클럽 관리 --- */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">

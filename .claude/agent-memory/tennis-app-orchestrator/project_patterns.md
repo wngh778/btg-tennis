@@ -26,6 +26,15 @@ Layout.tsx의 visibilitychange → window.location.reload() 로 인해 탭 state
 해결: `sql_migration_public_rls.sql` - clubs/sessions/matches/attendance/guests/session_groups 에 anon SELECT 허용.
 **적용 방법**: Supabase 대시보드 > SQL Editor에서 수동 실행 필요.
 
+## 도착 순위 기능 (2026-07-29)
+
+attendance 테이블에 `arrival_order` 컬럼 추가. `sql_migration_arrival_order.sql` 수동 실행 필요.
+- `setArrivalOrder(sessionId, playerId, order | null)` 전용 함수로 단독 업데이트 (null = 초기화)
+- VoteTab에서 관리자 전용 number input으로 입력 (attending=true인 선수만)
+- GenerateSettingsModal에서 도착 1~4위 모두 설정 시 "1라운드 도착순 자동편성" 체크박스 표시
+- matchmaking.ts `generateMatches`의 `firstRoundPlayers?: [P,P,P,P]` 옵션: 1,2팀 vs 3,4팀으로 round=1 수기배치, startRound=2부터 자동 생성
+- `useArrivalFirstRound` 상태가 `useGenerateModal`에 있고 SessionDetailPage에서 구조분해
+
 ## 게스트 지각 처리
 
 게스트는 `handleGuestLate(guest, isLate)` 함수로 지각 처리.

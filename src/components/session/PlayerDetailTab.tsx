@@ -1,8 +1,18 @@
-import { useState } from 'react';
 import type { Player, Match } from '../../types';
 
-export function PlayerDetailTab({ attendingPlayers, matches, showNtrp }: { attendingPlayers: Player[]; matches: Match[]; showNtrp: boolean }) {
-  const [showGuests, setShowGuests] = useState(false);
+export function PlayerDetailTab({
+  attendingPlayers,
+  matches,
+  showNtrp,
+  showGuests,
+  setShowGuests,
+}: {
+  attendingPlayers: Player[];
+  matches: Match[];
+  showNtrp: boolean;
+  showGuests: boolean;
+  setShowGuests: (v: boolean) => void;
+}) {
 
   // Per-player game count by type
   type PlayerStat = { male: number; female: number; mixed: number; total: number };

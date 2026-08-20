@@ -25,6 +25,8 @@ interface UseGenerateModalOptions {
   setMatches: React.Dispatch<React.SetStateAction<Match[]>>;
   setSession: React.Dispatch<React.SetStateAction<Session | null>>;
   setSelectedGroupId: React.Dispatch<React.SetStateAction<string | null>>;
+  // 도착순 1라운드 생성 콜백 (SessionDetailPage에서 주입)
+  arrivalRound1Handler?: () => Promise<void>;
 }
 
 export function useGenerateModal({
@@ -39,6 +41,7 @@ export function useGenerateModal({
   setMatches,
   setSession,
   setSelectedGroupId,
+  arrivalRound1Handler,
 }: UseGenerateModalOptions) {
   // ── 모드 선택 모달 ──────────────────────────────────────────────────────────
   const [showModeModal, setShowModeModal] = useState(false);
@@ -73,6 +76,9 @@ export function useGenerateModal({
   // ── 조간 대진 설정 ───────────────────────────────────────────────────────────
   const [generateCrossGroup, setGenerateCrossGroup] = useState(false);
   const [crossGroupPairs, setCrossGroupPairs] = useState<{ groupAId: string; groupBId: string }[]>([]);
+
+  // ── 도착순 1라운드 편성 ─────────────────────────────────────────────────────
+  const [useArrivalFirstRound, setUseArrivalFirstRound] = useState(false);
 
   // ── 수기 입력 모달 ───────────────────────────────────────────────────────────
   const [showManualMode, setShowManualMode] = useState(false);
@@ -125,11 +131,33 @@ export function useGenerateModal({
     if (!session) return;
     setShowGenerateModal(false);
     setShowMixedSuggestion(false);
+
+    // 도착순 1라운드 우선배정이 선택된 경우: 먼저 1라운드 생성
+    if (useArrivalFirstRound && arrivalRound1Handler) {
+      await arrivalRound1Handler();
+    }
+
     const allClubMatches = await getAllMatches(session.clubId);
     const pastMatches = allClubMatches.filter(m => m.sessionId !== session.id);
     const latePlayerIds = session.trackLate
       ? new Set(attendance.filter(a => a.attending && a.isLate === true).map(a => a.playerId))
       : new Set<string>();
+
+    // 도착순 1라운드 우선배정: round1이 DB에 생성됐으므로 2라운드부터 이어서 생성
+    // 미선택: 전체 초기화 후 1라운드부터 생성
+    const freshMatches = await getMatches(session.id);
+    const round1Matches = freshMatches.filter(m => m.round === 1);
+    const hasArrivalRound = useArrivalFirstRound && round1Matches.length > 0;
+    const startRoundToUse = hasArrivalRound ? 2 : 1;
+
+    // startRound 이상인 기존 경기 삭제 (재생성 시 중복 방지)
+    for (const m of freshMatches.filter(m => m.round >= startRoundToUse)) {
+      await deleteMatch(m.id);
+    }
+
+    // 도착 1라운드를 pair 히스토리에 포함해 2라운드부터 같은 페어 재매칭 방지
+    const extendedPastMatches = hasArrivalRound ? [...pastMatches, ...round1Matches] : pastMatches;
+
     const generated = generateMatches({
       sessionId: session.id,
       players: attendingPlayers,
@@ -138,17 +166,20 @@ export function useGenerateModal({
       mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
       mixedLast,
       sessionType: session.type,
-      pastMatches,
+      pastMatches: extendedPastMatches,
       latePlayerIds,
       strategy: generateStrategy,
+      startRound: startRoundToUse,
     });
-    await saveMatches(session.id, generated);
+    for (const m of generated) await insertMatch(m);
     await updateSession(session.id, {
       isGenerated: true,
       courts: generateCourts,
       rounds: generateRounds,
       mixedRounds: session.type === 'weekly' ? mixedRoundsToUse : 0,
     });
+    // 생성 완료 후 도착순 우선배정 토글 초기화
+    setUseArrivalFirstRound(false);
     // 재생성 후 전체 보기로 초기화 (suffix 탭 등 필터가 남아있으면 일부 라운드만 표시됨)
     setSelectedGroupId(null);
     // pendingMatches를 즉시 비워 stale 대진표가 잠깐 보이는 현상 방지
@@ -377,19 +408,37 @@ export function useGenerateModal({
   const handleMonthlyGenerate = async () => {
     if (!session) return;
     setShowModeModal(false);
+
+    // 도착순 1라운드 우선배정이 선택된 경우: 먼저 1라운드 생성
+    if (useArrivalFirstRound && arrivalRound1Handler) {
+      await arrivalRound1Handler();
+    }
+
     const generated = generateMonthlyMatches({
       sessionId: session.id,
       players: attendingPlayers,
       courts: session.courts,
       totalRounds: session.rounds,
     });
-    await saveMatches(session.id, generated);
+
+    if (useArrivalFirstRound) {
+      // 월례대회 경기 라운드를 +1 오프셋 (1라운드는 도착순으로 이미 배정됨)
+      const offsetMatches = generated.map(m => ({ ...m, round: m.round + 1 }));
+      // 기존 2라운드 이상 경기 삭제
+      const freshMatches = await getMatches(session.id);
+      for (const m of freshMatches.filter(m => m.round >= 2)) await deleteMatch(m.id);
+      for (const m of offsetMatches) await insertMatch(m);
+    } else {
+      await saveMatches(session.id, generated);
+    }
+
     await updateSession(session.id, {
       isGenerated: true,
       courts: session.courts,
       rounds: session.rounds,
       mixedRounds: 0,
     });
+    setUseArrivalFirstRound(false);
     setSelectedGroupId(null);
     startEditWithMatches([], 0);
     await load();
@@ -583,6 +632,8 @@ export function useGenerateModal({
     // 조간 대진
     generateCrossGroup, setGenerateCrossGroup,
     crossGroupPairs, setCrossGroupPairs,
+    // 도착순 1라운드 편성
+    useArrivalFirstRound, setUseArrivalFirstRound,
     // 핸들러
     handleGenerateClick,
     doGenerate,

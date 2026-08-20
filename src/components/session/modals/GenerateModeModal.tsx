@@ -2,6 +2,10 @@ interface GenerateModeModalProps {
   isSuperAdmin: boolean;
   currentClubName: string | undefined;
   gameMode?: 'normal' | 'group';
+  // 도착순 1라운드 우선배정 옵션 (도착 등록 4명 이상일 때만 표시)
+  arrivalOrderCount?: number;
+  useArrivalFirstRound: boolean;
+  setUseArrivalFirstRound: (v: boolean) => void;
   onClose: () => void;
   onSelectNormal: () => void;
   onSelectMonthly: () => void;
@@ -14,6 +18,9 @@ export function GenerateModeModal({
   isSuperAdmin,
   currentClubName,
   gameMode,
+  arrivalOrderCount = 0,
+  useArrivalFirstRound,
+  setUseArrivalFirstRound,
   onClose,
   onSelectNormal,
   onSelectMonthly,
@@ -22,6 +29,7 @@ export function GenerateModeModal({
   onSelectManual,
 }: GenerateModeModalProps) {
   const isGroupMode = gameMode === 'group';
+  const showArrivalOption = !isGroupMode && arrivalOrderCount >= 4;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-xs max-h-[92vh] flex flex-col">
@@ -29,7 +37,34 @@ export function GenerateModeModal({
           <h3 className="font-semibold text-slate-800">대진표 생성 모드 선택</h3>
           <p className="text-xs text-slate-500 mt-1">원하는 방식을 선택하세요.</p>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+
+        {/* 도착순 1라운드 우선배정 옵션 (도착 등록 4명 이상일 때만) */}
+        {showArrivalOption && (
+          <div className="mx-3 mt-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-800">1라운드 도착순 우선배정</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  도착 1·2위 vs 3·4위로 1라운드 먼저 배정 후 선택한 방식으로 이어서 생성
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUseArrivalFirstRound(!useArrivalFirstRound)}
+                className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none ${
+                  useArrivalFirstRound ? 'bg-amber-500' : 'bg-slate-300'
+                }`}
+                aria-pressed={useArrivalFirstRound}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${
+                  useArrivalFirstRound ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </label>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-2 mt-1">
           {/* 일반 대진표 */}
           <button
             onClick={onSelectNormal}

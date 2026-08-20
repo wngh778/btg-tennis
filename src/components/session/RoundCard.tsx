@@ -71,7 +71,7 @@ export function PlayerBadge({
         <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded">G</span>
       )}
       {gameNum !== undefined && (
-        <span className="hidden sm:inline text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
+        <span className="text-xs bg-slate-100 text-slate-500 px-1 rounded font-mono">{gameNum}번째</span>
       )}
       {showNtrp && <span className="hidden sm:inline text-xs font-mono text-slate-400 ml-auto">{player.ntrp.toFixed(1)}</span>}
     </div>
