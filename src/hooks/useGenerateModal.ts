@@ -151,9 +151,7 @@ export function useGenerateModal({
     const startRoundToUse = hasArrivalRound ? 2 : 1;
 
     // startRound 이상인 기존 경기 삭제 (재생성 시 중복 방지)
-    for (const m of freshMatches.filter(m => m.round >= startRoundToUse)) {
-      await deleteMatch(m.id);
-    }
+    await Promise.all(freshMatches.filter(m => m.round >= startRoundToUse).map(m => deleteMatch(m.id)));
 
     // 도착 1라운드를 pair 히스토리에 포함해 2라운드부터 같은 페어 재매칭 방지
     const extendedPastMatches = hasArrivalRound ? [...pastMatches, ...round1Matches] : pastMatches;
@@ -171,7 +169,7 @@ export function useGenerateModal({
       strategy: generateStrategy,
       startRound: startRoundToUse,
     });
-    for (const m of generated) await insertMatch(m);
+    await Promise.all(generated.map(m => insertMatch(m)));
     await updateSession(session.id, {
       isGenerated: true,
       courts: generateCourts,
@@ -234,15 +232,15 @@ export function useGenerateModal({
     // 단일 조: DB에서 해당 조 경기만 조회해서 삭제
     const freshMatches = await getMatches(session.id);
     if (groupId === 'all') {
-      for (const m of freshMatches) await deleteMatch(m.id);
+      await Promise.all(freshMatches.map(m => deleteMatch(m.id)));
     } else {
       const staleIds = freshMatches.filter(m => targetGroups.some(g => g.id === m.groupId)).map(m => m.id);
-      for (const id of staleIds) await deleteMatch(id);
+      await Promise.all(staleIds.map(id => deleteMatch(id)));
     }
 
-    for (const group of targetGroups) {
+    await Promise.all(targetGroups.map(async group => {
       const groupPlayers = attendingPlayers.filter(p => group.memberIds.includes(p.id));
-      if (groupPlayers.length < 4) continue;
+      if (groupPlayers.length < 4) return;
       const activeCourtsForGroup = Math.min(generateCourts, Math.floor(groupPlayers.length / 4));
       let totalRounds = generateRounds;
       if (generateMode === 'games') {
@@ -260,8 +258,8 @@ export function useGenerateModal({
         totalRounds,
         strategy: generateStrategy,
       });
-      for (const m of generated) await insertMatch(m);
-    }
+      await Promise.all(generated.map(m => insertMatch(m)));
+    }));
     await updateSession(session.id, { isGenerated: true, courts: generateCourts, rounds: generateRounds });
     // 생성된 조 탭으로 즉시 이동 (재생성 후 필터 동기화)
     setSelectedGroupId(groupId === 'all' ? null : groupId);
@@ -309,12 +307,12 @@ export function useGenerateModal({
 
     // 기존 조간 대진 경기(groupId 없는 경기) 삭제
     const existingCrossMatches = freshMatches.filter(m => !m.groupId);
-    for (const m of existingCrossMatches) await deleteMatch(m.id);
+    await Promise.all(existingCrossMatches.map(m => deleteMatch(m.id)));
 
     // 해당 쌍에 포함된 조들의 내부 대진도 삭제 (조간 대진 생성 시 내부 대진은 불필요)
     const involvedGroupIds = new Set(validPairs.flatMap(p => [p.groupAId, p.groupBId]));
     const existingInternalMatches = freshMatches.filter(m => m.groupId && involvedGroupIds.has(m.groupId));
-    for (const m of existingInternalMatches) await deleteMatch(m.id);
+    await Promise.all(existingInternalMatches.map(m => deleteMatch(m.id)));
 
     // 각 대결 쌍에 코트 분배: 나머지 코트는 앞 쌍부터 1개씩 추가 배분
     // 예) 3코트 / 2쌍 → [2, 1] (floor=1, remainder=1 → 첫 쌍이 +1)
@@ -362,7 +360,7 @@ export function useGenerateModal({
         strategy: generateStrategy,
       });
 
-      for (const m of generated) await insertMatch(m);
+      await Promise.all(generated.map(m => insertMatch(m)));
       courtOffset += pairCourts;
       if (pairRounds > maxGeneratedRounds) maxGeneratedRounds = pairRounds;
     }
@@ -426,8 +424,8 @@ export function useGenerateModal({
       const offsetMatches = generated.map(m => ({ ...m, round: m.round + 1 }));
       // 기존 2라운드 이상 경기 삭제
       const freshMatches = await getMatches(session.id);
-      for (const m of freshMatches.filter(m => m.round >= 2)) await deleteMatch(m.id);
-      for (const m of offsetMatches) await insertMatch(m);
+      await Promise.all(freshMatches.filter(m => m.round >= 2).map(m => deleteMatch(m.id)));
+      await Promise.all(offsetMatches.map(m => insertMatch(m)));
     } else {
       await saveMatches(session.id, generated);
     }

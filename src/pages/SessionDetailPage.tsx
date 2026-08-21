@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   getSession, getMembers, getGuests, getAttendance,
   setAttendance, setArrivalOrder, deleteAttendance,
-  getMatches, updateMatchScore, updateSession, updateMatch,
+  getMatches, updateMatchScore, updateSession,
   getSessionGroups, deleteMatch, insertMatch, saveMatches,
 } from '../lib/database';
 import { useAuth } from '../contexts/AuthContext';
@@ -56,25 +56,17 @@ export default function SessionDetailPage() {
   // 참석인원 상세 탭 — 게스트 포함 토글 (탭 전환 시에도 유지)
   const [showDetailGuests, setShowDetailGuests] = useState(false);
 
-  // Team Setup 모달 (소규모 — 페이지에 유지)
-  const [showTeamSetup, setShowTeamSetup] = useState(false);
-  const [teamSetupItems, setTeamSetupItems] = useState<{
-    matchId: string;
-    round: number;
-    court: number;
-    matchType: MatchType;
-    players: Player[];
-    rotation: number;
-  }[]>([]);
-
   // ── 훅 호출 전 파생 값 ─────────────────────────────────────────────────────
   // 이름은 members 최신 정보 우선 사용 → 멤버 이름 수정 후 즉시 대진표에 반영
-  const attendingPlayers: Player[] = attendance
-    .filter(a => a.attending)
-    .map(a => {
-      const member = a.playerType === 'member' ? members.find(m => m.id === a.playerId) : undefined;
-      return { id: a.playerId, name: member?.name ?? a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType };
-    });
+  const attendingPlayers = useMemo<Player[]>(() =>
+    attendance
+      .filter(a => a.attending)
+      .map(a => {
+        const member = a.playerType === 'member' ? members.find(m => m.id === a.playerId) : undefined;
+        return { id: a.playerId, name: member?.name ?? a.playerName, gender: a.gender, ntrp: a.ntrp, type: a.playerType };
+      }),
+    [attendance, members],
+  );
 
   // 탭 변경 + sessionStorage 저장
   const changeTab = (t: 'vote' | 'groups' | 'bracket' | 'detail' | 'result') => {
@@ -146,7 +138,7 @@ export default function SessionDetailPage() {
     };
     // 기존 1라운드 삭제 후 새 1라운드 삽입 (load()는 이후 doGenerate에서 일괄 처리)
     const currentRound1 = matches.filter(m => m.round === 1);
-    for (const m of currentRound1) await deleteMatch(m.id);
+    await Promise.all(currentRound1.map(m => deleteMatch(m.id)));
     await insertMatch(round1Match);
     await updateSession(session.id, { isGenerated: true });
   };
@@ -316,9 +308,7 @@ export default function SessionDetailPage() {
         const toDecrement = attendance.filter(
           a => a.attending && a.arrivalOrder != null && a.arrivalOrder > currentRank && a.playerId !== playerId
         );
-        for (const a of toDecrement) {
-          await setArrivalOrder(session.id, a.playerId, a.arrivalOrder! - 1);
-        }
+        await Promise.all(toDecrement.map(a => setArrivalOrder(session.id, a.playerId, a.arrivalOrder! - 1)));
       }
     } else {
       await setArrivalOrder(session.id, playerId, order);
@@ -363,48 +353,9 @@ export default function SessionDetailPage() {
         removedSet.has(m.team1.player1.id) || removedSet.has(m.team1.player2.id) ||
         removedSet.has(m.team2.player1.id) || removedSet.has(m.team2.player2.id)
       );
-      for (const m of toDelete) await deleteMatch(m.id);
+      await Promise.all(toDelete.map(m => deleteMatch(m.id)));
     }
     load();
-  };
-
-  // ── Team Setup ────────────────────────────────────────────────────────────
-  const getTeamRotations = (players: Player[], matchType: MatchType) => {
-    const valid = players.filter((p): p is Player => !!p);
-    if (valid.length < 4) {
-      const padded = [...valid];
-      while (padded.length < 4) padded.push(valid[padded.length % Math.max(valid.length, 1)]);
-      return [{ team1: [padded[0], padded[1]] as Player[], team2: [padded[2], padded[3]] as Player[] }];
-    }
-    if (matchType === 'mixed') {
-      const males = valid.filter(p => p.gender === 'male');
-      const females = valid.filter(p => p.gender === 'female');
-      if (males.length >= 2 && females.length >= 2) {
-        return [
-          { team1: [males[0], females[0]] as Player[], team2: [males[1], females[1]] as Player[] },
-          { team1: [males[0], females[1]] as Player[], team2: [males[1], females[0]] as Player[] },
-        ];
-      }
-    }
-    return [
-      { team1: [valid[0], valid[1]] as Player[], team2: [valid[2], valid[3]] as Player[] },
-      { team1: [valid[0], valid[2]] as Player[], team2: [valid[1], valid[3]] as Player[] },
-      { team1: [valid[0], valid[3]] as Player[], team2: [valid[1], valid[2]] as Player[] },
-    ];
-  };
-
-  const handleTeamSetupSave = async () => {
-    for (const item of teamSetupItems) {
-      const rotations = getTeamRotations(item.players, item.matchType);
-      const { team1, team2 } = rotations[item.rotation % rotations.length];
-      await updateMatch(item.matchId, {
-        team1: { player1: team1[0], player2: team1[1] },
-        team2: { player1: team2[0], player2: team2[1] },
-      });
-    }
-    setShowTeamSetup(false);
-    load();
-    changeTab('bracket');
   };
 
   const loadGroups = async () => {
@@ -854,89 +805,6 @@ export default function SessionDetailPage() {
         />
       )}
 
-      {/* ── 모달: 팀 배정 (소규모 — 페이지에 유지) ─────────────────────── */}
-      {showTeamSetup && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="font-semibold text-slate-800">팀 배정</h3>
-                <p className="text-xs text-slate-500 mt-0.5">각 경기의 팀 구성을 선택하세요.</p>
-              </div>
-              <button onClick={() => setShowTeamSetup(false)} className="text-slate-400 hover:text-slate-600 text-sm">닫기</button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-              {teamSetupItems.map((item, idx) => {
-                const rotations = getTeamRotations(item.players, item.matchType);
-                const current = rotations[item.rotation % rotations.length];
-                return (
-                  <div key={item.matchId} className="bg-slate-50 rounded-xl border border-slate-200 p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-semibold text-slate-600">
-                        {item.round}R · 코트{item.court}
-                        <span className={`ml-1.5 px-1.5 py-0.5 rounded text-xs ${
-                          item.matchType === 'mixed' ? 'bg-purple-100 text-purple-600' :
-                          item.matchType === 'male' ? 'bg-blue-100 text-blue-600' :
-                          'bg-pink-100 text-pink-600'
-                        }`}>
-                          {item.matchType === 'mixed' ? '혼복' : item.matchType === 'male' ? '남복' : '여복'}
-                        </span>
-                      </p>
-                      {rotations.length > 1 && (
-                        <button
-                          onClick={() =>
-                            setTeamSetupItems(prev =>
-                              prev.map((it, i) => i === idx ? { ...it, rotation: it.rotation + 1 } : it)
-                            )
-                          }
-                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                        >
-                          팀 바꾸기
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                      <div className="space-y-1">
-                        {current.team1.map(p => (
-                          <div key={p.id} className={`px-2 py-1 rounded-lg text-xs font-medium text-center ${
-                            p.gender === 'male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
-                          }`}>
-                            {p.name}
-                          </div>
-                        ))}
-                      </div>
-                      <span className="text-slate-400 font-bold text-xs">vs</span>
-                      <div className="space-y-1">
-                        {current.team2.map(p => (
-                          <div key={p.id} className={`px-2 py-1 rounded-lg text-xs font-medium text-center ${
-                            p.gender === 'male' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
-                          }`}>
-                            {p.name}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {teamSetupItems.length === 0 && (
-                <p className="text-center text-slate-400 text-sm py-8">팀 배정할 미완료 경기가 없습니다.</p>
-              )}
-            </div>
-            <div className="px-4 py-3 border-t border-slate-100 flex gap-2 shrink-0">
-              <button
-                onClick={() => setShowTeamSetup(false)}
-                className="flex-1 py-2.5 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-              >취소</button>
-              <button
-                onClick={handleTeamSetupSave}
-                disabled={teamSetupItems.length === 0}
-                className="flex-1 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
-              >저장</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
