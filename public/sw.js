@@ -1,6 +1,6 @@
 // Tennis App Service Worker
 // 배포 시 CACHE_VERSION을 올리면 → 구버전 캐시 자동 삭제 + 새 버전 로드
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `tennis-app-${CACHE_VERSION}`;
 
 // ── Install ─────────────────────────────────────────────────────────────────
